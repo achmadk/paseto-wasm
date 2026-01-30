@@ -1,0 +1,75 @@
+{
+  "name": "paseto-wasm",
+  "version": "1.0.1",
+  "type": "module",
+  "description": "A PASETO implementation in Rust with WebAssembly (WASM) bindings",
+  "module": "pkg/paseto_wasm.js",
+  "main": "pkg/cjs/paseto_wasm.cjs",
+  "types": "pkg/paseto_wasm.d.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:wasm": "rimraf pkg && pnpm run build:wasm:web && pnpm run build:wasm:node && pnpm run build:wasm:web:v3 && pnpm run build:wasm:node:v3",
+    "build:wasm:web": "wasm-pack build --target web",
+    "build:wasm:web:v3": "mkdirp pkg/v3 && wasm-pack build --target web --out-dir pkg/v3 --features v3 --no-default-features",
+    "build:wasm:node": "mkdirp pkg/cjs && wasm-pack build --target nodejs --out-dir pkg/cjs && shx mv pkg/cjs/paseto_wasm.js pkg/cjs/paseto_wasm.cjs",
+    "build:wasm:node:v3": "mkdirp pkg/v3/cjs && wasm-pack build --target nodejs --out-dir pkg/v3/cjs --features v3 --no-default-features && shx mv pkg/v3/cjs/paseto_wasm.js pkg/v3/cjs/paseto_wasm.cjs",
+    "test": "pnpm run test:wasm:node && pnpm run test:wasm:web:v3",
+    "test:wasm:node": "node tests/node_test.cjs",
+    "test:wasm:web": "cross-env NO_HEADLESS=true wasm-pack test --chrome",
+    "test:wasm:web:v3": "cross-env NO_HEADLESS=true wasm-pack test --chrome --features v3 --no-default-features",
+    "prepublishOnly": "pnpm run build:wasm"
+  },
+  "keywords": [
+    "PASETO",
+    "WASM",
+    "Rust",
+    "v3",
+    "v4",
+    "PASERK"
+  ],
+  "author": "Achmad Kurnianto",
+  "exports": {
+    ".": {
+      "import": "./pkg/paseto_wasm.js",
+      "require": "./pkg/cjs/paseto_wasm.cjs",
+      "types": "./pkg/paseto_wasm.d.ts"
+    },
+    "./v3": {
+      "import": "./pkg/v3/paseto_wasm.js",
+      "require": "./pkg/v3/cjs/paseto_wasm.cjs",
+      "types": "./pkg/v3/paseto_wasm.d.ts"
+    }
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.28.1",
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.2",
+    "cross-env": "^10.1.0",
+    "mkdirp": "^3.0.1",
+    "paseto-ts": "^2.0.5",
+    "react": "^19.2.3",
+    "rimraf": "^6.1.2",
+    "shx": "^0.4.0",
+    "tinybench": "^6.0.0",
+    "vite-tsconfig-paths": "^6.0.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.9",
+    "@types/react-dom": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "vite": "^7.3.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "npm:rolldown-vite@latest"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/achmadk/paseto-wasm.git"
+  },
+  "files": [
+    "pkg"
+  ]
+}
