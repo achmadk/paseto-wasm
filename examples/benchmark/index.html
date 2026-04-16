@@ -4,10 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>benchmark</title>
+    <title>PASETO Benchmark</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <h1>⚡ PASETO Benchmark</h1>
+      <p class="subtitle">Comparing <strong>paseto-ts</strong> vs <strong>paseto-wasm</strong></p>
+
+      <div class="controls">
+        <button id="runBenchmark" disabled>Loading...</button>
+      </div>
+      <div id="results"></div>
+      <div id="status"></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
