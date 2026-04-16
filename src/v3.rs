@@ -1,84 +1,52 @@
-//! PASETO V3 (Platform-Agnostic Security Tokens) Implementation
+//! # PASETO V3 WebAssembly Implementation
 //!
-//! This module provides WebAssembly bindings for PASETO version 3, which uses
-//! P-384 (secp384r1) elliptic curve cryptography for both encryption and signatures.
+//! PASETO Version 3 using P-384 (secp384r1) elliptic curve cryptography.
 //!
-//! ## Overview
+//! ## Cryptographic Specifications
 //!
-//! PASETO is a security token format that provides a secure, simple alternative
-//! to JWTs. Unlike JWTs, PASETO has no algorithm confusion vulnerabilities because
-//! the version is embedded in the token structure.
-//!
-//! ### V3 Specifications
-//! - **Local (Encryption)**: AES-256-CTR + HMAC-SHA384 (EtM mode)
-//! - **Public (Signatures)**: ECDSA with P-384 (secp384r1)
-//! - **Key Sizes**: 32 bytes (local key), 48 bytes (secret key), 49 bytes (public key)
+//! | Property | Local | Public |
+//! |----------|-------|--------|
+//! | Algorithm | AES-256-CTR + HMAC-SHA384 | ECDSA P-384 |
+//! | Key Size | 32 bytes | 48 bytes (secret), 49 bytes (public) |
+//! | Signature | 48 bytes (MAC) | 96 bytes |
 //!
 //! ## Token Formats
 //!
-//! ### Local Token (Encrypted)
-//! ```text
-//! v3.local.<base64-encoded-ciphertext-with-nonce>
-//! ```
+//! - Local: `v3.local.<nonce || ciphertext || mac>`
+//! - Public: `v3.public.<message || signature>`
 //!
-//! ### Public Token (Signed)
-//! ```text
-//! v3.public.<base64-encoded-message-signature-pair>
-//! ```
+//! ## PAE Order (Public Signatures)
 //!
-//! ## Usage Example (JavaScript)
+//! 1. Public key (49 bytes)
+//! 2. Header ("v3.public.")
+//! 3. Message
+//! 4. Footer
+//! 5. Implicit assertion
 //!
-//! ```javascript
-//! // Generate a local key for encryption
-//! const localKey = generate_v3_local_key();
+//! ## PASERK Formats
 //!
-//! // Encrypt a message
-//! const token = encrypt_v3_local(localKey, { data: "secret" });
-//!
-//! // Decrypt the message
-//! const decrypted = decrypt_v3_local(localKey, token);
-//!
-//! // Or use public key cryptography for signed tokens
-//! const keyPair = generate_v3_public_key_pair();
-//! const signedToken = sign_v3_public(keyPair.secret, { data: "message" });
-//! const verified = verify_v3_public(keyPair.public, signedToken);
-//! ```
-//!
-//! ## Security Considerations
-//!
-//! 1. **Key Management**: Keys must be kept secret. Never expose keys in client-side code.
-//! 2. **Key Size**: V3 local keys are 32 bytes (256-bit), secret keys are 48 bytes (384-bit).
-//! 3. **Footer Usage**: The footer is transmitted in plaintext. Don't put secrets there.
-//! 4. **Implicit Assertion**: Additional authenticated data that is verified but not included in the token.
-//! 5. **Nonce Generation**: Nonces are randomly generated for each encryption operation.
-//!
-//! ## PASERK (Key Serialization)
-//!
-//! PASERK provides a standardized format for serializing keys:
-//! - `k3.local.*` - Symmetric encryption key
-//! - `k3.secret.*` - Signing secret key (48 bytes)
-//! - `k3.public.*` - Verification public key (49 bytes compressed)
-//! - `k3.lid.*` - Key ID for local keys (BLAKE2b-264 hash)
-//! - `k3.pid.*` - Key ID for public keys
-//! - `k3.sid.*` - Key ID for secret keys
-//!
-//! See: <https://paseto.io/paserk>
+//! - `k3.local.*` - 32-byte symmetric key
+//! - `k3.secret.*` - 48-byte secret key
+//! - `k3.public.*` - 49-byte public key
+//! - `k3.lid.*`, `k3.pid.*`, `k3.sid.*` - Key IDs
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use p384::{
+    ecdsa::{
+        signature::{Signer, Verifier},
+        Signature, SigningKey, VerifyingKey,
+    },
+    elliptic_curve::rand_core::OsRng,
+};
 use rusty_paseto_v3::core::{
     Footer, ImplicitAssertion, Key, Local, Paseto, PasetoNonce, PasetoSymmetricKey, Payload, V3,
 };
 use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 
-// Constants
 const V3_PUBLIC_HEADER: &str = "v3.public.";
-const SIG_SIZE: usize = 96; // P-384 signature: 48 bytes * 2 (r + s)
+const SIG_SIZE: usize = 96;
 
-/// Pre-Authentication Encoding (PAE) - builds authenticated data for V3 signatures.
-///
-/// PAE encodes multiple pieces of data into a single buffer with length prefixes,
-/// ensuring the signature covers all components (header, public key, message, footer, implicit).
 fn pae(pieces: &[&[u8]]) -> Vec<u8> {
     let mut output = Vec::new();
     output.extend_from_slice(&(pieces.len() as u64).to_le_bytes());
@@ -89,23 +57,36 @@ fn pae(pieces: &[&[u8]]) -> Vec<u8> {
     output
 }
 
-/// Encrypt a message using PASETO V3 Local (symmetric encryption).
+/// Generates a random 32-byte symmetric key for V3 local encryption.
 ///
-/// # Arguments
-/// * `key_hex` - 32-byte symmetric key as hex string
-/// * `message` - JSON object or string to encrypt
-/// * `footer` - Optional footer (transmitted in plaintext)
-/// * `implicit_assertion` - Optional implicit assertion (additional authenticated data)
-///
-/// # Returns
-/// Base64-encoded token: `v3.local.<ciphertext>`
-///
-/// # Example
+/// @example
 /// ```javascript
-/// const key = generate_v3_local_key();
-/// const token = encrypt_v3_local(key, { "data": "secret" });
-/// // token: "v3.local.eyJkYXRhIjoic2VjcmV0In0..."
+/// const key = paseto.generate_v3_local_key();
+/// // Returns: "2a04316d13e1e479e288861df6eaec3b088ee33d..."
 /// ```
+///
+/// @returns {string} 64-character hex string (32 bytes)
+#[wasm_bindgen]
+pub fn generate_v3_local_key() -> String {
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).expect("RNG failure");
+    hex::encode(key)
+}
+
+/// Encrypts a message using V3 Local (AES-256-CTR + HMAC-SHA384).
+///
+/// @example
+/// ```javascript
+/// const key = paseto.generate_v3_local_key();
+/// const token = paseto.encrypt_v3_local(key, { user: "123" }, null, null);
+/// // Returns: "v3.local.eyJ1c2VyIjoiMTIzIn0..."
+/// ```
+///
+/// @param {string} keyHex - 32-byte key as hex string
+/// @param {string|object} message - Payload to encrypt
+/// @param {string|null} footer - Optional footer
+/// @param {string|null} implicitAssertion - Optional implicit assertion
+/// @returns {string} Token: `v3.local.<ciphertext>`
 #[wasm_bindgen]
 pub fn encrypt_v3_local(
     key_hex: &str,
@@ -120,7 +101,6 @@ pub fn encrypt_v3_local(
     let k = Key::<32>::from(key_array);
     let key = PasetoSymmetricKey::<V3, Local>::from(k);
 
-    // Convert message to JSON string - accept either a string or an object
     let message_str = crate::common::serialize_message(message)?;
 
     let mut builder = Paseto::<V3, Local>::default();
@@ -141,6 +121,19 @@ pub fn encrypt_v3_local(
     Ok(token)
 }
 
+/// Decrypts a V3 Local token.
+///
+/// @example
+/// ```javascript
+/// const decrypted = paseto.decrypt_v3_local(key, token, null, null);
+/// // Returns: '{"user":"123"}'
+/// ```
+///
+/// @param {string} keyHex - 32-byte key as hex string
+/// @param {string} token - Encrypted token
+/// @param {string|null} footer - Footer used during encryption
+/// @param {string|null} implicitAssertion - Implicit assertion used during encryption
+/// @returns {string} Decrypted message
 #[wasm_bindgen]
 pub fn decrypt_v3_local(
     key_hex: &str,
@@ -163,6 +156,64 @@ pub fn decrypt_v3_local(
     Ok(message)
 }
 
+/// V3 asymmetric key pair.
+#[wasm_bindgen]
+pub struct V3KeyPair {
+    secret: String,
+    public: String,
+}
+
+#[wasm_bindgen]
+impl V3KeyPair {
+    /// 48-byte secret key (96 hex chars).
+    #[wasm_bindgen(getter)]
+    pub fn secret(&self) -> String {
+        self.secret.clone()
+    }
+    /// 49-byte public key in compressed format (98 hex chars).
+    #[wasm_bindgen(getter)]
+    pub fn public(&self) -> String {
+        self.public.clone()
+    }
+}
+
+/// Generates an ECDSA P-384 key pair.
+///
+/// @example
+/// ```javascript
+/// const kp = paseto.generate_v3_public_key_pair();
+/// console.log(kp.secret); // "8d849f0466aefa3560e76f444dd04eb4..."
+/// console.log(kp.public); // "0279ebc6ef14966554668c483e3c52d2..."
+/// ```
+///
+/// @returns {V3KeyPair} { secret: 96-hex, public: 98-hex }
+#[wasm_bindgen]
+pub fn generate_v3_public_key_pair() -> V3KeyPair {
+    let signing_key = SigningKey::random(&mut OsRng);
+    let secret_bytes = signing_key.to_bytes();
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let public_bytes = verifying_key.to_encoded_point(true);
+
+    V3KeyPair {
+        secret: hex::encode(secret_bytes),
+        public: hex::encode(public_bytes.as_bytes()),
+    }
+}
+
+/// Signs a message using V3 Public (ECDSA P-384).
+///
+/// @example
+/// ```javascript
+/// const kp = paseto.generate_v3_public_key_pair();
+/// const token = paseto.sign_v3_public(kp.secret, { data: "test" }, null, null);
+/// // Returns: "v3.public.eyJkYXRhIjoidGVzdCJ9..."
+/// ```
+///
+/// @param {string} secretKeyHex - 48-byte secret key as hex
+/// @param {string|object} message - Payload to sign
+/// @param {string|null} footer - Optional footer
+/// @param {string|null} implicitAssertion - Optional implicit assertion
+/// @returns {string} Token: `v3.public.<message || signature>`
 #[wasm_bindgen]
 pub fn sign_v3_public(
     secret_key_hex: &str,
@@ -175,7 +226,7 @@ pub fn sign_v3_public(
     let signing_key =
         SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
-    let pk_bytes = verifying_key.to_encoded_point(true); // compressed
+    let pk_bytes = verifying_key.to_encoded_point(true);
     let pk_slice = pk_bytes.as_bytes();
 
     let message_str = crate::common::serialize_message(message)?;
@@ -184,8 +235,8 @@ pub fn sign_v3_public(
     let implicit = implicit_assertion.unwrap_or_default();
 
     let pre_auth = pae(&[
-        V3_PUBLIC_HEADER.as_bytes(),
         pk_slice,
+        V3_PUBLIC_HEADER.as_bytes(),
         message_str.as_bytes(),
         footer_str.as_bytes(),
         implicit.as_bytes(),
@@ -205,6 +256,19 @@ pub fn sign_v3_public(
     ))
 }
 
+/// Verifies a V3 Public token (ECDSA P-384).
+///
+/// @example
+/// ```javascript
+/// const verified = paseto.verify_v3_public(kp.public, token, null, null);
+/// // Returns: '{"data":"test"}'
+/// ```
+///
+/// @param {string} publicKeyHex - 49-byte public key as hex
+/// @param {string} token - Signed token
+/// @param {string|null} footer - Footer used during signing
+/// @param {string|null} implicitAssertion - Implicit assertion used during signing
+/// @returns {string} Verified message
 #[wasm_bindgen]
 pub fn verify_v3_public(
     public_key_hex: &str,
@@ -237,8 +301,8 @@ pub fn verify_v3_public(
     let sig_bytes = &payload[message_len..];
 
     let pre_auth = pae(&[
-        V3_PUBLIC_HEADER.as_bytes(),
         &key_vec,
+        V3_PUBLIC_HEADER.as_bytes(),
         message_bytes,
         footer_str.as_bytes(),
         implicit.as_bytes(),
@@ -255,95 +319,106 @@ pub fn verify_v3_public(
         .map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
 }
 
-#[wasm_bindgen]
-pub fn generate_v3_local_key() -> String {
-    let mut key = [0u8; 32];
-    getrandom::fill(&mut key).expect("RNG failure");
-    hex::encode(key)
-}
-
-#[wasm_bindgen]
-pub struct V3KeyPair {
-    secret: String,
-    public: String,
-}
-
-#[wasm_bindgen]
-impl V3KeyPair {
-    #[wasm_bindgen(getter)]
-    pub fn secret(&self) -> String {
-        self.secret.clone()
-    }
-    #[wasm_bindgen(getter)]
-    pub fn public(&self) -> String {
-        self.public.clone()
-    }
-}
-
-// Key generation logic
-use p384::{
-    ecdsa::{
-        signature::{Signer, Verifier},
-        Signature, SigningKey, VerifyingKey,
-    },
-    elliptic_curve::rand_core::OsRng,
-};
-
-#[wasm_bindgen]
-pub fn generate_v3_public_key_pair() -> V3KeyPair {
-    let signing_key = SigningKey::random(&mut OsRng);
-    let secret_bytes = signing_key.to_bytes(); // 48 bytes
-    let verifying_key = VerifyingKey::from(&signing_key);
-    let public_bytes = verifying_key.to_encoded_point(true); // 49 bytes
-
-    V3KeyPair {
-        secret: hex::encode(secret_bytes),
-        public: hex::encode(public_bytes.as_bytes()),
-    }
-}
-
-// ============================================================================
-// PASERK (Platform-Agnostic Serialized Keys) Functions V3
-// ============================================================================
-
-/// Convert a hex-encoded local key to PASERK format (k3.local.*)
+/// Converts a V3 local key to PASERK format.
+///
+/// @example
+/// ```javascript
+/// paseto.key_to_paserk_v3_local("2a04316d13e1e479...")
+/// // Returns: "k3.local.VKBDGxE+4XmOKIhh3y6Ow4IP4jXQ..."
+/// ```
+///
+/// @param {string} keyHex - 32-byte key as hex
+/// @returns {string} PASERK: `k3.local.<base64>`
 #[wasm_bindgen]
 pub fn key_to_paserk_v3_local(key_hex: &str) -> Result<String, JsValue> {
     crate::common::paserk_encode(key_hex, 32, "k3.local.")
 }
 
-/// Parse a PASERK local key (k3.local.*) back to hex format
+/// Converts a PASERK local key to hex format.
+///
+/// @example
+/// ```javascript
+/// paseto.paserk_v3_local_to_key("k3.local.VKBDGxE...")
+/// // Returns: "2a04316d13e1e479e288861df6eaec3b..."
+/// ```
+///
+/// @param {string} paserk - PASERK string starting with "k3.local."
+/// @returns {string} 32-byte key as hex
 #[wasm_bindgen]
 pub fn paserk_v3_local_to_key(paserk: &str) -> Result<String, JsValue> {
     crate::common::paserk_decode(paserk, "k3.local.", 32)
 }
 
-/// Convert a hex-encoded secret key (48 bytes) to PASERK format (k3.secret.*)
+/// Converts a V3 secret key to PASERK format.
+///
+/// @example
+/// ```javascript
+/// paseto.key_to_paserk_v3_secret("8d849f0466aefa356...")
+/// // Returns: "k3.secret.g9hCOkJmrvNWAedGRN0E6009..."
+/// ```
+///
+/// @param {string} secretKeyHex - 48-byte key as hex
+/// @returns {string} PASERK: `k3.secret.<base64>`
 #[wasm_bindgen]
 pub fn key_to_paserk_v3_secret(secret_key_hex: &str) -> Result<String, JsValue> {
     crate::common::paserk_encode(secret_key_hex, 48, "k3.secret.")
 }
 
-/// Parse a PASERK secret key (k3.secret.*) back to hex format
+/// Converts a PASERK secret key to hex format.
+///
+/// @example
+/// ```javascript
+/// paseto.paserk_v3_secret_to_key("k3.secret.g9hCOkJmrv...")
+/// // Returns: "8d849f0466aefa3560e76f444dd04eb4..."
+/// ```
+///
+/// @param {string} paserk - PASERK string starting with "k3.secret."
+/// @returns {string} 48-byte key as hex
 #[wasm_bindgen]
 pub fn paserk_v3_secret_to_key(paserk: &str) -> Result<String, JsValue> {
     crate::common::paserk_decode(paserk, "k3.secret.", 48)
 }
 
-/// Convert a hex-encoded public key (49 bytes) to PASERK format (k3.public.*)
+/// Converts a V3 public key to PASERK format.
+///
+/// @example
+/// ```javascript
+/// paseto.key_to_paserk_v3_public("0279ebc6ef149665...")
+/// // Returns: "k3.public.Auecbv8UkmZVRojE48xSLQIB..."
+/// ```
+///
+/// @param {string} publicKeyHex - 49-byte key as hex
+/// @returns {string} PASERK: `k3.public.<base64>`
 #[wasm_bindgen]
 pub fn key_to_paserk_v3_public(public_key_hex: &str) -> Result<String, JsValue> {
     crate::common::paserk_encode(public_key_hex, 49, "k3.public.")
 }
 
-/// Parse a PASERK public key (k3.public.*) back to hex format
+/// Converts a PASERK public key to hex format.
+///
+/// @example
+/// ```javascript
+/// paseto.paserk_v3_public_to_key("k3.public.Auecbv8Ukm...")
+/// // Returns: "0279ebc6ef14966554668c483e3c52d2..."
+/// ```
+///
+/// @param {string} paserk - PASERK string starting with "k3.public."
+/// @returns {string} 49-byte key as hex
 #[wasm_bindgen]
 pub fn paserk_v3_public_to_key(paserk: &str) -> Result<String, JsValue> {
     crate::common::paserk_decode(paserk, "k3.public.", 49)
 }
 
-/// Get the key ID (lid) for a local key (k3.lid.*)
-/// The lid is a BLAKE2b-264 hash of "k3.local." + key bytes
+/// Generates a key ID for a V3 local key (k3.lid.*).
+///
+/// @example
+/// ```javascript
+/// paseto.get_v3_local_key_id("2a04316d13e1e479...")
+/// // Returns: "k3.lid.V2JnQ4LmhP0fYh3T..."
+/// ```
+///
+/// @param {string} keyHex - 32-byte key as hex
+/// @returns {string} PASERK ID: `k3.lid.<base64>`
 #[wasm_bindgen]
 pub fn get_v3_local_key_id(key_hex: &str) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(key_hex, 32)?;
@@ -354,8 +429,16 @@ pub fn get_v3_local_key_id(key_hex: &str) -> Result<String, JsValue> {
     ))
 }
 
-/// Get the key ID (pid) for a public key (k3.pid.*)
-/// The pid is a BLAKE2b-264 hash of "k3.public." + key bytes
+/// Generates a key ID for a V3 public key (k3.pid.*).
+///
+/// @example
+/// ```javascript
+/// paseto.get_v3_public_key_id("0279ebc6ef149665...")
+/// // Returns: "k3.pid.aG5hY2hxR3fN..."
+/// ```
+///
+/// @param {string} publicKeyHex - 49-byte key as hex
+/// @returns {string} PASERK ID: `k3.pid.<base64>`
 #[wasm_bindgen]
 pub fn get_v3_public_key_id(public_key_hex: &str) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
@@ -366,8 +449,16 @@ pub fn get_v3_public_key_id(public_key_hex: &str) -> Result<String, JsValue> {
     ))
 }
 
-/// Get the key ID (sid) for a secret key (k3.sid.*)
-/// The sid is derived from the public key portion associated with the secret key
+/// Generates a key ID for a V3 secret key (k3.sid.*).
+///
+/// @example
+/// ```javascript
+/// paseto.get_v3_secret_key_id("8d849f0466aefa356...")
+/// // Returns: "k3.sid.mG5iZGln..."
+/// ```
+///
+/// @param {string} secretKeyHex - 48-byte key as hex
+/// @returns {string} PASERK ID: `k3.sid.<base64>`
 #[wasm_bindgen]
 pub fn get_v3_secret_key_id(secret_key_hex: &str) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(secret_key_hex, 48)?;
@@ -375,10 +466,10 @@ pub fn get_v3_secret_key_id(secret_key_hex: &str) -> Result<String, JsValue> {
     let signing_key =
         SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
-    let pk_bytes = verifying_key.to_encoded_point(true); // compressed
-    let pk_slice = pk_bytes.as_bytes(); // 49 bytes
+    let pk_bytes = verifying_key.to_encoded_point(true);
+    let pk_slice = pk_bytes.as_bytes();
 
     Ok(crate::common::paserk_id_from_bytes(
         pk_slice, "k3.sid.", "k3.sid.",
-    )) // NOTE: using k3.sid. for both usage and id header
+    ))
 }
