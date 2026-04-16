@@ -287,7 +287,20 @@ pub fn verify_v3_public(
     let footer_str = footer.unwrap_or_default();
     let implicit = implicit_assertion.unwrap_or_default();
 
-    let encoded_payload = &token[V3_PUBLIC_HEADER.len()..];
+    // Token format: v3.public.{m||sig}.{footer}
+    // Split at the last dot to separate footer
+    let after_header = &token[V3_PUBLIC_HEADER.len()..];
+
+    // Find the last dot - everything after is the footer
+    let (encoded_payload, _token_footer) = match after_header.rfind('.') {
+        Some(pos) => {
+            let payload_part = &after_header[..pos];
+            let token_footer = &after_header[pos + 1..];
+            (payload_part, Some(token_footer))
+        }
+        None => (after_header, None),
+    };
+
     let payload = URL_SAFE_NO_PAD
         .decode(encoded_payload)
         .map_err(|e| JsValue::from_str(&format!("Base64 Error: {}", e)))?;
