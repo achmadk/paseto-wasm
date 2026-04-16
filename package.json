@@ -18,7 +18,8 @@
     "test:wasm:node": "node tests/node_test.cjs",
     "test:wasm:web": "cross-env NO_HEADLESS=true wasm-pack test --chrome",
     "test:wasm:web:v3": "cross-env NO_HEADLESS=true wasm-pack test --chrome --features v3 --no-default-features",
-    "prepublishOnly": "pnpm run build:wasm"
+    "removeDirsBeforePrepublish": "rimraf -g \"./pkg/**/.gitignore\" && rimraf -g \"./pkg/**/package.json\" && rimraf -g \"./pkg/**/README.md\" && rimraf -g \"./pkg/**/paseto_wasm.d.ts\"",
+    "prepublishOnly": "pnpm run build:wasm && pnpm run removeDirsBeforePrepublish"
   },
   "keywords": [
     "PASETO",
@@ -35,6 +36,11 @@
       "require": "./pkg/cjs/paseto_wasm.cjs",
       "types": "./pkg/paseto_wasm.d.ts"
     },
+    "./v4": {
+      "import": "./pkg/paseto_wasm.js",
+      "require": "./pkg/cjs/paseto_wasm.cjs",
+      "types": "./pkg/paseto_wasm.d.ts"
+    },
     "./v3": {
       "import": "./pkg/v3/paseto_wasm.js",
       "require": "./pkg/v3/cjs/paseto_wasm.cjs",
@@ -42,23 +48,25 @@
     }
   },
   "license": "MIT",
-  "packageManager": "pnpm@10.28.1",
+  "packageManager": "pnpm@10.33.0",
   "dependencies": {
-    "@vitejs/plugin-react": "^5.1.2",
+    "@vitejs/plugin-react": "^6.0.1",
     "cross-env": "^10.1.0",
+    "mitata": "^1.0.34",
     "mkdirp": "^3.0.1",
-    "paseto-ts": "^2.0.5",
-    "react": "^19.2.3",
-    "rimraf": "^6.1.2",
+    "paseto": "^3.1.4",
+    "paseto-ts": "^2.0.6",
+    "react": "^19.2.5",
+    "rimraf": "^6.1.3",
     "shx": "^0.4.0",
     "tinybench": "^6.0.0",
-    "vite-tsconfig-paths": "^6.0.5"
+    "vite-tsconfig-paths": "^6.1.1"
   },
   "devDependencies": {
-    "@types/react": "^19.2.9",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "vite": "^7.3.1"
+    "react-dom": "^19.2.5",
+    "vite": "^8.0.8"
   },
   "pnpm": {
     "overrides": {
@@ -70,6 +78,7 @@
     "url": "https://github.com/achmadk/paseto-wasm.git"
   },
   "files": [
-    "pkg"
+    "pkg",
+    "types"
   ]
 }
