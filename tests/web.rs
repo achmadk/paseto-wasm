@@ -1,9 +1,9 @@
-use wasm_bindgen_test::*;
-use wasm_bindgen::JsValue;
-#[cfg(feature = "v4")]
-use paseto_wasm::v4;
 #[cfg(feature = "v3")]
 use paseto_wasm::v3;
+#[cfg(feature = "v4")]
+use paseto_wasm::v4;
+use wasm_bindgen::JsValue;
+use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
@@ -12,10 +12,10 @@ wasm_bindgen_test_configure!(run_in_browser);
 fn test_v4_local() {
     let key = v4::generate_v4_local_key();
     let message = JsValue::from_str("hello world");
-    
+
     let token = v4::encrypt_v4_local(&key, message.clone(), None, None).expect("encrypt failed");
     let decrypted = v4::decrypt_v4_local(&key, &token, None, None).expect("decrypt failed");
-    
+
     assert_eq!(decrypted, "hello world");
 }
 
@@ -25,10 +25,11 @@ fn test_v4_local_with_footer() {
     let key = v4::generate_v4_local_key();
     let message = JsValue::from_str("hello footer");
     let footer = Some("footer".to_string());
-    
-    let token = v4::encrypt_v4_local(&key, message.clone(), footer.clone(), None).expect("encrypt failed");
+
+    let token =
+        v4::encrypt_v4_local(&key, message.clone(), footer.clone(), None).expect("encrypt failed");
     let decrypted = v4::decrypt_v4_local(&key, &token, footer, None).expect("decrypt failed");
-    
+
     assert_eq!(decrypted, "hello footer");
 }
 
@@ -37,10 +38,12 @@ fn test_v4_local_with_footer() {
 fn test_v4_public() {
     let key_pair = v4::generate_v4_public_key_pair();
     let message = JsValue::from_str("hello public");
-    
-    let token = v4::sign_v4_public(&key_pair.secret(), message.clone(), None, None).expect("sign failed");
-    let verified = v4::verify_v4_public(&key_pair.public(), &token, None, None).expect("verify failed");
-    
+
+    let token =
+        v4::sign_v4_public(&key_pair.secret(), message.clone(), None, None).expect("sign failed");
+    let verified =
+        v4::verify_v4_public(&key_pair.public(), &token, None, None).expect("verify failed");
+
     assert_eq!(verified, "hello public");
 }
 
@@ -66,10 +69,10 @@ fn test_v4_paserk() {
     assert!(paserk_secret.starts_with("k4.secret."));
     let secret_back = v4::paserk_secret_to_key(&paserk_secret).expect("secret back");
     assert_eq!(kp.secret(), secret_back);
-    
+
     let pid = v4::get_public_key_id(&kp.public()).expect("pid");
     assert!(pid.starts_with("k4.pid."));
-    
+
     let sid = v4::get_secret_key_id(&kp.secret()).expect("sid");
     assert!(sid.starts_with("k4.sid."));
 }
@@ -79,10 +82,10 @@ fn test_v4_paserk() {
 fn test_v3_local() {
     let key = v3::generate_v3_local_key();
     let message = JsValue::from_str("hello v3");
-    
+
     let token = v3::encrypt_v3_local(&key, message.clone(), None, None).expect("encrypt failed");
     let decrypted = v3::decrypt_v3_local(&key, &token, None, None).expect("decrypt failed");
-    
+
     assert_eq!(decrypted, "hello v3");
 }
 
@@ -91,10 +94,12 @@ fn test_v3_local() {
 fn test_v3_public() {
     let key_pair = v3::generate_v3_public_key_pair();
     let message = JsValue::from_str("hello v3 public");
-    
-    let token = v3::sign_v3_public(&key_pair.secret(), message.clone(), None, None).expect("sign failed");
-    let verified = v3::verify_v3_public(&key_pair.public(), &token, None, None).expect("verify failed");
-    
+
+    let token =
+        v3::sign_v3_public(&key_pair.secret(), message.clone(), None, None).expect("sign failed");
+    let verified =
+        v3::verify_v3_public(&key_pair.public(), &token, None, None).expect("verify failed");
+
     assert_eq!(verified, "hello v3 public");
 }
 
@@ -126,4 +131,47 @@ fn test_v3_paserk() {
 
     let sid = v3::get_v3_secret_key_id(&kp.secret()).expect("sid");
     assert!(sid.starts_with("k3.sid."));
+}
+
+#[cfg(feature = "v3")]
+#[wasm_bindgen_test]
+fn test_v3_local_with_footer() {
+    let key = v3::generate_v3_local_key();
+    let message = JsValue::from_str("hello v3 with footer");
+    let footer = Some("footer data".to_string());
+
+    let token =
+        v3::encrypt_v3_local(&key, message.clone(), footer.clone(), None).expect("encrypt failed");
+    let decrypted = v3::decrypt_v3_local(&key, &token, footer, None).expect("decrypt failed");
+
+    assert_eq!(decrypted, "hello v3 with footer");
+}
+
+#[cfg(feature = "v3")]
+#[wasm_bindgen_test]
+fn test_v3_public_with_footer() {
+    let key_pair = v3::generate_v3_public_key_pair();
+    let message = JsValue::from_str("hello v3 public with footer");
+    let footer = Some("v3 footer".to_string());
+
+    let token = v3::sign_v3_public(&key_pair.secret(), message.clone(), footer.clone(), None)
+        .expect("sign failed");
+    let verified =
+        v3::verify_v3_public(&key_pair.public(), &token, footer, None).expect("verify failed");
+
+    assert_eq!(verified, "hello v3 public with footer");
+}
+
+#[cfg(feature = "v3")]
+#[wasm_bindgen_test]
+fn test_v3_public_wrong_key_fails() {
+    let key_pair1 = v3::generate_v3_public_key_pair();
+    let key_pair2 = v3::generate_v3_public_key_pair();
+    let message = JsValue::from_str("test message");
+
+    let token = v3::sign_v3_public(&key_pair1.secret(), message, None, None).expect("sign failed");
+
+    // Verification with wrong key should fail
+    let result = v3::verify_v3_public(&key_pair2.public(), &token, None, None);
+    assert!(result.is_err());
 }
