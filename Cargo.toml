@@ -22,7 +22,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = "0.2"
 rusty_paseto = { version = "0.9", features = ["v4_local", "v4_public", "generic", "paserk"] }
-rusty_paseto_v3 = { git = "https://github.com/rrrodzilla/rusty_paseto", package = "rusty_paseto", features = ["v3_local", "v3_public", "generic", "paserk"], optional = true, default-features = false }
+rusty_paseto_v3 = { version = "0.9", git = "https://github.com/rrrodzilla/rusty_paseto", package = "rusty_paseto", features = ["v3_local", "v3_public", "generic", "paserk"], optional = true, default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-wasm-bindgen = "0.6"
