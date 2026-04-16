@@ -1,6 +1,6 @@
 {
   "name": "paseto-wasm",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "type": "module",
   "description": "A PASETO implementation in Rust with WebAssembly (WASM) bindings",
   "module": "pkg/paseto_wasm.js",
