@@ -15,11 +15,11 @@
     "build:wasm:node": "mkdirp pkg/cjs && wasm-pack build --target nodejs --out-dir pkg/cjs && shx mv pkg/cjs/paseto_wasm.js pkg/cjs/paseto_wasm.cjs",
     "build:wasm:node:v3": "mkdirp pkg/v3/cjs && wasm-pack build --target nodejs --out-dir pkg/v3/cjs --features v3 --no-default-features && shx mv pkg/v3/cjs/paseto_wasm.js pkg/v3/cjs/paseto_wasm.cjs",
     "test": "pnpm run test:wasm:node && pnpm run test:wasm:web:v3",
-    "test:wasm:node": "node tests/node_test.cjs",
+    "test:wasm:node": "node tests/node_test.cjs && node test-cross-impl.mjs && node test-node.mjs && node test-vectors.mjs",
     "test:wasm:web": "cross-env NO_HEADLESS=true wasm-pack test --chrome",
     "test:wasm:web:v3": "cross-env NO_HEADLESS=true wasm-pack test --chrome --features v3 --no-default-features",
     "removeDirsBeforePrepublish": "rimraf -g \"./pkg/**/.gitignore\" && rimraf -g \"./pkg/**/package.json\" && rimraf -g \"./pkg/**/README.md\" && rimraf -g \"./pkg/**/paseto_wasm.d.ts\"",
-    "prepublishOnly": "pnpm run build:wasm && pnpm run removeDirsBeforePrepublish"
+    "prepublishOnly": "pnpm run test:wasm:node && pnpm run build:wasm && pnpm run removeDirsBeforePrepublish"
   },
   "keywords": [
     "PASETO",
