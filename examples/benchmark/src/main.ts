@@ -1,63 +1,97 @@
 import './style.css'
 
-import { Bench } from 'tinybench'
-import init, { generate_v4_public_key_pair, key_to_paserk_public, key_to_paserk_secret, paserk_public_to_key, paserk_secret_to_key, sign_v4_public } from 'paseto-wasm'
-import { sign, generateKeys } from "paseto-ts/v4"
+const runBtn = document.getElementById('runBenchmark') as HTMLButtonElement
+const statusEl = document.getElementById('status') as HTMLParagraphElement
+const resultsEl = document.getElementById('results') as HTMLDivElement
 
-// import typescriptLogo from './typescript.svg'
-// import viteLogo from '/vite.svg'
+interface BenchmarkResult {
+  name: string
+  tag: 'wasm' | 'ts'
+  opsPerSec: number
+  mean: number
+  margin: number
+}
 
-// import { setupCounter } from './counter.ts'
+runBtn.disabled = false
+runBtn.textContent = 'Run Benchmark'
 
-const keys = generateKeys("public", { format: "paserk" })
-console.log(keys);
+function formatOpsPerSec(ops: number): string {
+  if (ops < 100) return ops.toFixed(2)
+  if (ops < 1000) return ops.toFixed(1)
+  return Math.round(ops).toLocaleString()
+}
 
-await init();
-console.log("PASETO wasm library initialized");
-const pasetoWasmv4PublicKeyPair = generate_v4_public_key_pair();
-const pasetoWasmv4PublicKeys = {
-  public: paserk_public_to_key(keys.publicKey),
-  secret: paserk_secret_to_key(keys.secretKey),
-};
-console.log(pasetoWasmv4PublicKeys);
+function formatMean(ms: number): string {
+  if (ms < 1) return (ms * 1000).toFixed(2) + 'µs'
+  if (ms < 1000) return ms.toFixed(2) + 'ms'
+  return (ms / 1000).toFixed(2) + 's'
+}
 
-const bench = new Bench({
-  name: 'PASETO library benchmark',
-  time: 1000,
+function renderResults(results: BenchmarkResult[]): void {
+  const groups = [
+    { title: 'V4 Public Sign (Ed25519)', items: results.filter((r) => r.name.includes('V4 Sign')) },
+    { title: 'V4 Public Verify (Ed25519)', items: results.filter((r) => r.name.includes('V4 Verify')) },
+  ]
+
+  let html = '<div class="results-container">'
+
+  for (const group of groups) {
+    const wasmItem = group.items.find((i) => i.tag === 'wasm')
+    const tsItem = group.items.find((i) => i.tag === 'ts')
+    const wasmWinner = wasmItem && tsItem ? wasmItem.opsPerSec > tsItem.opsPerSec : false
+    const tsWinner = wasmItem && tsItem ? tsItem.opsPerSec > wasmItem.opsPerSec : false
+    const speedup = wasmItem && tsItem ? wasmItem.opsPerSec / tsItem.opsPerSec : null
+    
+    if (group.items.length > 0) {
+      html += `<div class="test-group"><h2>${group.title}</h2>`
+
+      for (const item of group.items) {
+        const isWinner = (item.tag === 'wasm' && wasmWinner) || (item.tag === 'ts' && tsWinner)
+        html +=
+          '<div class="test-card ' + (isWinner ? 'winner' : '') + '">' +
+          '<div class="test-name">' + item.name + ' <span class="tag ' + item.tag + '">' + item.tag.toUpperCase() + '</span></div>' +
+          '<div class="metrics">' +
+          '<div class="metric"><div class="metric-value">' + formatOpsPerSec(item.opsPerSec) + '</div><div class="metric-label">ops/sec</div></div>' +
+          '<div class="metric"><div class="metric-value">' + formatMean(item.mean) + '</div><div class="metric-label">mean</div></div>' +
+          '<div class="metric"><div class="metric-value">±' + item.margin.toFixed(1) + '%</div><div class="metric-label">margin</div></div>' +
+          '</div></div>'
+      }
+    }
+
+    html += '<div class="comparison">'
+    if (speedup) {
+      html += speedup > 1
+        ? '<span class="winner-badge">WASM ' + speedup.toFixed(1) + 'x faster</span>'
+        : '<span class="winner-badge">TypeScript ' + (1 / speedup).toFixed(1) + 'x faster</span>'
+    }
+    html += '</div></div>'
+  }
+
+  html += '</div>'
+  resultsEl.innerHTML = html
+}
+
+const worker = new Worker(new URL('./workers/benchmark.worker.ts', import.meta.url), { type: 'module' })
+
+worker.onmessage = (e) => {
+  if (e.data.type === 'status') {
+    statusEl.textContent = e.data.message
+  } if (e.data.type === 'done_partial') {
+    renderResults(e.data.results)
+  } else if (e.data.type === 'done_all') {
+    statusEl.textContent = 'Done!'
+    runBtn.disabled = false
+    runBtn.textContent = 'Run Again'
+    runBtn.classList.remove('running')
+    renderResults(e.data.results)
+  }
+}
+
+runBtn.addEventListener('click', () => {
+  runBtn.disabled = true
+  runBtn.textContent = 'Running...'
+  runBtn.classList.add('running')
+  resultsEl.innerHTML = ''
+  statusEl.textContent = 'Starting benchmark...'
+  worker.postMessage({ type: 'start' })
 })
-
-const signPayload = { hello: "test" };
-
-bench
-  .add("paseto-ts sign", () => {
-    sign(keys.secretKey, signPayload, { footer: "test" })
-  })
-  .add("paseto-wasm sign", () => {
-    sign_v4_public(pasetoWasmv4PublicKeyPair.secret, signPayload, "test")
-  })
-
-
-await bench.run()
-
-console.log(bench.name)
-console.table(bench.table())
-
-// document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-//   <div>
-//     <a href="https://vite.dev" target="_blank">
-//       <img src="${viteLogo}" class="logo" alt="Vite logo" />
-//     </a>
-//     <a href="https://www.typescriptlang.org/" target="_blank">
-//       <img src="${typescriptLogo}" class="logo vanilla" alt="TypeScript logo" />
-//     </a>
-//     <h1>Vite + TypeScript</h1>
-//     <div class="card">
-//       <button id="counter" type="button"></button>
-//     </div>
-//     <p class="read-the-docs">
-//       Click on the Vite and TypeScript logos to learn more
-//     </p>
-//   </div>
-// `
-
-// setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
