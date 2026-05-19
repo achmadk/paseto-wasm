@@ -1,0 +1,1512 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>paseto-wasm — PASETO for Browsers via WebAssembly</title>
+    <meta
+      name="description"
+      content="A PASETO implementation in Rust with WebAssembly bindings. Enable secure tokens in JavaScript browsers with v4 and v3 support."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,600;0,700;1,600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-deep: #0c0f14;
+        --bg-surface: #131720;
+        --bg-elevated: #1a1f2b;
+        --bg-hover: #222838;
+        --border-subtle: #2a3040;
+        --border-focus: #3d4a5c;
+        --ink-primary: #e8ecf2;
+        --ink-secondary: #8b95a8;
+        --ink-muted: #5c6578;
+        --accent: #2dd4a8;
+        --accent-dim: #1fa882;
+        --accent-glow: rgba(45, 212, 168, 0.12);
+        --accent-subtle: rgba(45, 212, 168, 0.06);
+        --code-bg: #0e1218;
+        --red: #f87171;
+        --amber: #fbbf24;
+        --blue: #60a5fa;
+        --font-display: "Source Serif 4", Georgia, serif;
+        --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+        --font-mono: "JetBrains Mono", "Fira Code", monospace;
+        --max-w: 1120px;
+        --radius: 8px;
+      }
+
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        font-family: var(--font-body);
+        background: var(--bg-deep);
+        color: var(--ink-primary);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      a:hover {
+        color: var(--accent-dim);
+      }
+
+      /* ---- NAV ---- */
+      nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 100;
+        background: rgba(12, 15, 20, 0.85);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+      .nav-inner {
+        max-width: var(--max-w);
+        margin: 0 auto;
+        padding: 0 24px;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .nav-brand {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--ink-primary);
+      }
+      .nav-brand span {
+        color: var(--accent);
+      }
+      .nav-links {
+        display: flex;
+        gap: 28px;
+        align-items: center;
+      }
+      .nav-links a {
+        font-size: 14px;
+        color: var(--ink-secondary);
+        font-weight: 500;
+      }
+      .nav-links a:hover {
+        color: var(--ink-primary);
+      }
+      .nav-links .btn-gh {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: var(--radius);
+        border: 1px solid var(--border-subtle);
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--ink-secondary);
+        transition:
+          border-color 0.15s,
+          color 0.15s;
+      }
+      .nav-links .btn-gh:hover {
+        border-color: var(--border-focus);
+        color: var(--ink-primary);
+      }
+      .nav-links .btn-gh svg {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+      }
+
+      /* ---- HERO ---- */
+      .hero {
+        padding: 140px 24px 80px;
+        max-width: var(--max-w);
+        margin: 0 auto;
+      }
+      .hero-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 14px;
+        border-radius: 100px;
+        background: var(--accent-subtle);
+        border: 1px solid rgba(45, 212, 168, 0.15);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--accent);
+        margin-bottom: 28px;
+      }
+      .hero-badge::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .hero h1 {
+        font-family: var(--font-display);
+        font-size: clamp(36px, 6vw, 60px);
+        font-weight: 700;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        margin-bottom: 20px;
+        text-wrap: pretty;
+      }
+      .hero h1 .accent {
+        color: var(--accent);
+      }
+      .hero-sub {
+        font-size: clamp(16px, 2vw, 19px);
+        color: var(--ink-secondary);
+        max-width: 640px;
+        line-height: 1.7;
+        margin-bottom: 36px;
+        text-wrap: pretty;
+      }
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-bottom: 48px;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 24px;
+        border-radius: var(--radius);
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        border: none;
+        transition:
+          background 0.15s,
+          transform 0.1s;
+      }
+      .btn:active {
+        transform: scale(0.98);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: var(--bg-deep);
+      }
+      .btn-primary:hover {
+        background: var(--accent-dim);
+        color: var(--bg-deep);
+      }
+      .btn-secondary {
+        background: var(--bg-elevated);
+        color: var(--ink-primary);
+        border: 1px solid var(--border-subtle);
+      }
+      .btn-secondary:hover {
+        background: var(--bg-hover);
+      }
+
+      /* ---- INSTALL BAR ---- */
+      .install-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--code-bg);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius);
+        padding: 14px 20px;
+        font-family: var(--font-mono);
+        font-size: 14px;
+        max-width: 480px;
+        position: relative;
+      }
+      .install-bar .prompt {
+        color: var(--accent);
+        user-select: none;
+      }
+      .install-bar code {
+        color: var(--ink-primary);
+        flex: 1;
+      }
+      .install-bar .copy-btn {
+        background: none;
+        border: none;
+        color: var(--ink-muted);
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition: color 0.15s;
+      }
+      .install-bar .copy-btn:hover {
+        color: var(--ink-primary);
+      }
+      .install-bar .copy-btn svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      /* ---- CODE BLOCK ---- */
+      .code-block {
+        background: var(--code-bg);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .code-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-subtle);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--ink-muted);
+      }
+      .code-header .dots {
+        display: flex;
+        gap: 6px;
+      }
+      .code-header .dots span {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--border-subtle);
+      }
+      .code-header .dots span:first-child {
+        background: #f87171;
+      }
+      .code-header .dots span:nth-child(2) {
+        background: #fbbf24;
+      }
+      .code-header .dots span:nth-child(3) {
+        background: #34d399;
+      }
+      .code-body {
+        padding: 20px;
+        overflow-x: auto;
+        font-family: var(--font-mono);
+        font-size: 13px;
+        line-height: 1.7;
+        tab-size: 2;
+      }
+      .code-body .kw {
+        color: #c084fc;
+      }
+      .code-body .fn {
+        color: #60a5fa;
+      }
+      .code-body .str {
+        color: #34d399;
+      }
+      .code-body .cm {
+        color: var(--ink-muted);
+        font-style: italic;
+      }
+      .code-body .num {
+        color: #fbbf24;
+      }
+      .code-body .op {
+        color: var(--ink-secondary);
+      }
+      .code-body .type {
+        color: #f472b6;
+      }
+
+      /* ---- SECTIONS ---- */
+      section {
+        padding: 80px 24px;
+      }
+      .section-inner {
+        max-width: var(--max-w);
+        margin: 0 auto;
+      }
+      .section-label {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--accent);
+        margin-bottom: 12px;
+      }
+      .section-title {
+        font-family: var(--font-display);
+        font-size: clamp(28px, 4vw, 40px);
+        font-weight: 700;
+        line-height: 1.15;
+        letter-spacing: -0.01em;
+        margin-bottom: 16px;
+        text-wrap: pretty;
+      }
+      .section-desc {
+        font-size: 16px;
+        color: var(--ink-secondary);
+        max-width: 560px;
+        line-height: 1.7;
+        margin-bottom: 48px;
+        text-wrap: pretty;
+      }
+
+      /* ---- FEATURES GRID ---- */
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 20px;
+      }
+      .feature-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius);
+        padding: 28px;
+        transition: border-color 0.2s;
+      }
+      .feature-card:hover {
+        border-color: var(--border-focus);
+      }
+      .benchmark-card {
+        transition:
+          border-color 0.2s,
+          transform 0.2s;
+      }
+      .benchmark-card:hover {
+        border-color: var(--accent);
+        transform: translateY(-2px);
+      }
+      .feature-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        background: var(--accent-subtle);
+        border: 1px solid rgba(45, 212, 168, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 16px;
+      }
+      .feature-icon svg {
+        width: 20px;
+        height: 20px;
+        stroke: var(--accent);
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .feature-card h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .feature-card p {
+        font-size: 14px;
+        color: var(--ink-secondary);
+        line-height: 1.6;
+      }
+
+      /* ---- QUICK START ---- */
+      .quick-start {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 40px;
+        align-items: start;
+      }
+      @media (max-width: 768px) {
+        .quick-start {
+          grid-template-columns: 1fr;
+        }
+      }
+      .quick-start .steps {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+      }
+      .step {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+      }
+      .step-num {
+        flex-shrink: 0;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--accent-subtle);
+        border: 1px solid rgba(45, 212, 168, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+      .step h4 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .step p {
+        font-size: 14px;
+        color: var(--ink-secondary);
+        line-height: 1.6;
+      }
+
+      /* ---- VERSION TABLE ---- */
+      .version-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      .version-table th {
+        text-align: left;
+        padding: 12px 16px;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--ink-muted);
+        border-bottom: 1px solid var(--border-subtle);
+      }
+      .version-table td {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border-subtle);
+        color: var(--ink-secondary);
+      }
+      .version-table td:first-child {
+        font-family: var(--font-mono);
+        font-weight: 600;
+        color: var(--ink-primary);
+      }
+      .version-table .recommended {
+        display: inline-flex;
+        padding: 2px 8px;
+        border-radius: 100px;
+        background: var(--accent-subtle);
+        color: var(--accent);
+        font-size: 11px;
+        font-weight: 600;
+        margin-left: 8px;
+      }
+
+      /* ---- API REFERENCE ---- */
+      .api-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px;
+      }
+      .api-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: var(--radius);
+        padding: 20px;
+      }
+      .api-card code {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent);
+        display: block;
+        margin-bottom: 8px;
+      }
+      .api-card p {
+        font-size: 13px;
+        color: var(--ink-secondary);
+        line-height: 1.6;
+      }
+      .api-card .tag {
+        display: inline-block;
+        margin-top: 10px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .api-card .tag.local {
+        background: rgba(96, 165, 250, 0.1);
+        color: var(--blue);
+      }
+      .api-card .tag.public {
+        background: rgba(251, 191, 36, 0.1);
+        color: var(--amber);
+      }
+
+      /* ---- FOOTER ---- */
+      footer {
+        border-top: 1px solid var(--border-subtle);
+        padding: 48px 24px;
+      }
+      .footer-inner {
+        max-width: var(--max-w);
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+      .footer-inner p {
+        font-size: 13px;
+        color: var(--ink-muted);
+      }
+      .footer-links {
+        display: flex;
+        gap: 24px;
+      }
+      .footer-links a {
+        font-size: 13px;
+        color: var(--ink-secondary);
+      }
+      .footer-links a:hover {
+        color: var(--ink-primary);
+      }
+
+      /* ---- DIVIDER ---- */
+      .divider {
+        max-width: var(--max-w);
+        margin: 0 auto;
+        padding: 0 24px;
+      }
+      .divider hr {
+        border: none;
+        border-top: 1px solid var(--border-subtle);
+      }
+
+      /* ---- RESPONSIVE ---- */
+      @media (max-width: 640px) {
+        .nav-links {
+          gap: 16px;
+        }
+        .nav-links a:not(.btn-gh) {
+          display: none;
+        }
+        .hero {
+          padding: 120px 20px 60px;
+        }
+        section {
+          padding: 60px 20px;
+        }
+        .features-grid {
+          grid-template-columns: 1fr;
+        }
+        .api-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ---- ANIMATIONS ---- */
+      @media (prefers-reduced-motion: no-preference) {
+        /* Hero stagger entrance */
+        .hero-badge,
+        .hero h1,
+        .hero-sub,
+        .hero-actions,
+        .hero .code-block {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+
+        /* Hero background canvas */
+        .hero-bg {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          pointer-events: none;
+          overflow: hidden;
+          z-index: 0;
+        }
+        .hero-bg canvas {
+          width: 100%;
+          height: 100%;
+        }
+        .hero {
+          position: relative;
+        }
+        .hero > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        /* Scroll reveal for sections */
+        .reveal-section {
+          opacity: 0;
+          transform: translateY(24px);
+          transition:
+            opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+            transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .reveal-section.visible {
+          opacity: 1;
+          transform: translateY(0);
+        }
+
+        /* Feature cards stagger */
+        .reveal-section.visible .feature-card {
+          opacity: 0;
+          transform: translateY(20px);
+          animation: cardReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .reveal-section.visible .feature-card:nth-child(1) {
+          animation-delay: 0.08s;
+        }
+        .reveal-section.visible .feature-card:nth-child(2) {
+          animation-delay: 0.16s;
+        }
+        .reveal-section.visible .feature-card:nth-child(3) {
+          animation-delay: 0.24s;
+        }
+        .reveal-section.visible .feature-card:nth-child(4) {
+          animation-delay: 0.32s;
+        }
+        .reveal-section.visible .feature-card:nth-child(5) {
+          animation-delay: 0.4s;
+        }
+        .reveal-section.visible .feature-card:nth-child(6) {
+          animation-delay: 0.48s;
+        }
+
+        /* Benchmark card stagger */
+        .reveal-section.visible .benchmark-card {
+          opacity: 0;
+          transform: translateY(20px);
+          animation: cardReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .reveal-section.visible .benchmark-card {
+          animation-delay: 0.12s;
+        }
+
+        @keyframes cardReveal {
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        /* API cards stagger */
+        .reveal-section.visible .api-card {
+          opacity: 0;
+          transform: translateY(16px);
+          animation: cardReveal 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .reveal-section.visible .api-card:nth-child(1) {
+          animation-delay: 0.06s;
+        }
+        .reveal-section.visible .api-card:nth-child(2) {
+          animation-delay: 0.12s;
+        }
+        .reveal-section.visible .api-card:nth-child(3) {
+          animation-delay: 0.18s;
+        }
+        .reveal-section.visible .api-card:nth-child(4) {
+          animation-delay: 0.24s;
+        }
+        .reveal-section.visible .api-card:nth-child(5) {
+          animation-delay: 0.3s;
+        }
+        .reveal-section.visible .api-card:nth-child(6) {
+          animation-delay: 0.36s;
+        }
+        .reveal-section.visible .api-card:nth-child(7) {
+          animation-delay: 0.42s;
+        }
+        .reveal-section.visible .api-card:nth-child(8) {
+          animation-delay: 0.48s;
+        }
+
+        /* Code block typing cursor */
+        .code-body .typing-line {
+          border-right: 2px solid var(--accent);
+          animation: blink 1s step-end infinite;
+          padding-right: 2px;
+        }
+        @keyframes blink {
+          0%,
+          100% {
+            border-color: var(--accent);
+          }
+          50% {
+            border-color: transparent;
+          }
+        }
+
+        /* Version table row highlight on hover */
+        .version-table tbody tr {
+          transition: background 0.2s;
+        }
+        .version-table tbody tr:hover {
+          background: var(--accent-subtle);
+        }
+
+        /* Install bar shimmer */
+        .install-bar::after {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: -100%;
+          width: 60%;
+          height: 100%;
+          background: linear-gradient(90deg, transparent, rgba(45, 212, 168, 0.04), transparent);
+          animation: shimmer 4s ease-in-out infinite;
+          animation-delay: 3s;
+        }
+        @keyframes shimmer {
+          0%,
+          100% {
+            left: -100%;
+          }
+          50% {
+            left: 150%;
+          }
+        }
+
+        /* Nav entrance */
+        nav {
+          transform: translateY(-100%);
+          animation: navSlide 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+        }
+        @keyframes navSlide {
+          to {
+            transform: translateY(0);
+          }
+        }
+
+        /* Step numbers subtle pulse */
+        .reveal-section.visible .step-num {
+          animation: stepPulse 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        .reveal-section.visible .step:nth-child(1) .step-num {
+          animation-delay: 0.2s;
+        }
+        .reveal-section.visible .step:nth-child(2) .step-num {
+          animation-delay: 0.4s;
+        }
+        .reveal-section.visible .step:nth-child(3) .step-num {
+          animation-delay: 0.6s;
+        }
+        @keyframes stepPulse {
+          0% {
+            transform: scale(0.5);
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- NAV -->
+    <nav>
+      <div class="nav-inner">
+        <div class="nav-brand">paseto<span>-wasm</span></div>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#benchmarks">Benchmarks</a>
+          <a href="#quick-start">Quick Start</a>
+          <a href="#api">API</a>
+          <a
+            href="https://github.com/achmadk/paseto-wasm"
+            class="btn-gh"
+            target="_blank"
+            rel="noopener"
+          >
+            <svg viewBox="0 0 16 16">
+              <path
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 1.2-.27.36-.09.72-.14 1.08-.14.36 0 .72.05 1.08.14.53.06 1.2.27 1.2.27.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+              />
+            </svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-bg"><canvas id="hero-canvas"></canvas></div>
+      <div class="hero-badge">v2.0.1 · MIT License</div>
+      <h1>PASETO for browsers,<br /><span class="accent">powered by WebAssembly</span></h1>
+      <p class="hero-sub">
+        A Rust implementation of Platform-Agnostic Security Tokens compiled to WASM. Bring v4 and v3
+        PASETO support to any JavaScript environment — browsers and Node.js alike.
+      </p>
+      <div class="hero-actions">
+        <div class="install-bar">
+          <span class="prompt">$</span>
+          <code id="install-cmd">pnpm add paseto-wasm</code>
+          <button class="copy-btn" onclick="copyInstall()" aria-label="Copy to clipboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+            </svg>
+          </button>
+        </div>
+        <a href="#quick-start" class="btn btn-primary">Quick Start →</a>
+        <a href="#api" class="btn btn-secondary">API Reference</a>
+      </div>
+
+      <!-- Hero code preview -->
+      <div class="code-block" style="max-width: 640px">
+        <div class="code-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <span>example.js</span>
+        </div>
+        <div class="code-body">
+          <p>
+            <span class="kw">import</span> init, <span class="op">*</span>
+            <span class="kw">as</span> v4 <span class="kw">from</span>
+            <span class="str">'paseto-wasm'</span>;
+          </p>
+          <br />
+          <p>
+            <span class="cm">// Initialize WASM module</span>
+          </p>
+          <p><span class="kw">await</span> <span class="fn">init</span>();</p>
+          <br />
+          <p>
+            <span class="cm">// Generate encryption key</span>
+          </p>
+          <p>
+            <span class="kw">const</span> key <span class="op">=</span> v4.<span class="fn"
+              >generate_v4_local_key</span
+            >();
+          </p>
+          <br />
+          <p>
+            <span class="cm">// Encrypt &amp; decrypt</span>
+          </p>
+          <p>
+            <span class="kw">const</span> token <span class="op">=</span> v4.<span class="fn"
+              >encrypt_v4_local</span
+            >(key, { user: <span class="str">'alice'</span> });
+          </p>
+          <p>
+            <span class="kw">const</span> plain <span class="op">=</span> v4.<span class="fn"
+              >decrypt_v4_local</span
+            >(key, token);
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- FEATURES -->
+    <section id="features" class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">Why PASETO</div>
+        <h2 class="section-title">JOSE done right</h2>
+        <p class="section-desc">
+          PASETO fixes the design flaws in JWT, JWE, and JWS. No algorithm confusion, no padding
+          oracle attacks — just secure tokens that work.
+        </p>
+        <div class="features-grid">
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
+            </div>
+            <h3>WebAssembly Performance</h3>
+            <p>
+              Rust compiled to WASM runs near-native speed in browsers. No JavaScript crypto
+              polyfills, no performance compromise.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24">
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0110 0v4" />
+              </svg>
+            </div>
+            <h3>v4 &amp; v3 Support</h3>
+            <p>
+              XChaCha20-Poly1305 and Ed25519 for modern apps (v4). AES-256-CTR + HMAC-SHA384 for
+              FIPS environments (v3).
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <h3>PASERK Key Serialization</h3>
+            <p>
+              Standardized key encoding with Key IDs (lid, pid, sid). Serialize, restore, and
+              identify keys without exposing material.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </div>
+            <h3>Universal Runtime</h3>
+            <p>
+              Works in browsers via ES modules and in Node.js via CommonJS. One library, every
+              JavaScript environment.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24">
+                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            </div>
+            <h3>TypeScript Ready</h3>
+            <p>
+              Shipped with .d.ts type definitions. Full autocompletion in VS Code, no @types package
+              needed.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">
+              <svg viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 6v6l4 2" />
+              </svg>
+            </div>
+            <h3>Battle-Tested Core</h3>
+            <p>
+              Built on rusty-paseto, a mature Rust crate with comprehensive test vectors and
+              cross-implementation validation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- BENCHMARK -->
+    <section id="benchmarks" class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">Benchmark</div>
+        <h2 class="section-title">WASM vs TypeScript performance</h2>
+        <p class="section-desc">
+          See how <strong>paseto-wasm</strong> compares head-to-head against
+          <strong>paseto-ts</strong>
+          for real-world PASETO operations — signing and verification, right in your browser.
+        </p>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap">
+          <a
+            href="https://paseto-wasm-benchmark-browser.achmadk.com/"
+            target="_blank"
+            rel="noopener"
+            class="feature-card benchmark-card"
+            style="
+              display: flex;
+              flex-direction: column;
+              align-items: flex-start;
+              gap: 12px;
+              padding: 32px;
+              text-decoration: none;
+              flex: 1;
+              min-width: 280px;
+            "
+          >
+            <div class="feature-icon">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+            <h3 style="font-size: 18px; font-weight: 600; color: var(--ink-primary); margin: 0">
+              Run the benchmark →
+            </h3>
+            <p style="font-size: 14px; color: var(--ink-secondary); line-height: 1.6; margin: 0">
+              Open the interactive benchmark suite in your browser. Tests V4 Ed25519 sign + verify
+              across multiple iterations with warmup. Results are computed live using tinybench.
+            </p>
+            <span
+              style="
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 14px;
+                border-radius: 100px;
+                background: var(--accent-subtle);
+                border: 1px solid rgba(45, 212, 168, 0.15);
+                font-family: var(--font-mono);
+                font-size: 12px;
+                color: var(--accent);
+                margin-top: 4px;
+              "
+              >paseto-wasm-benchmark-browser.achmadk.com ↗</span
+            >
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- QUICK START -->
+    <section id="quick-start" class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">Quick Start</div>
+        <h2 class="section-title">Up and running in 30 seconds</h2>
+        <p class="section-desc">Install, initialize, and encrypt your first token. That's it.</p>
+        <div class="quick-start" style="align-items: center">
+          <div class="steps">
+            <div class="step">
+              <div class="step-num">1</div>
+              <div>
+                <h4>Install the package</h4>
+                <p>Add to your project with npm, yarn, pnpm, or bun.</p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">2</div>
+              <div>
+                <h4>Initialize WASM</h4>
+                <p>
+                  Call the default export before using any crypto methods. It loads the compiled
+                  Rust module.
+                </p>
+              </div>
+            </div>
+            <div class="step">
+              <div class="step-num">3</div>
+              <div>
+                <h4>Encrypt or Sign</h4>
+                <p>
+                  Use local keys for symmetric encryption, or key pairs for asymmetric signing. Both
+                  v4 and v3 available.
+                </p>
+              </div>
+            </div>
+          </div>
+          <div class="code-block">
+            <div class="code-header">
+              <div class="dots"><span></span><span></span><span></span></div>
+              <span>full-example.js</span>
+            </div>
+            <div class="code-body">
+              <p>
+                <span class="kw">import</span> initV4, <span class="op">*</span>
+                <span class="kw">as</span> v4 <span class="kw">from</span>
+                <span class="str">'paseto-wasm'</span>;
+              </p>
+              <br />
+              <p>
+                <span class="cm">// Initialize the WASM module first</span>
+              </p>
+              <p><span class="kw">await</span> <span class="fn">initV4</span>();</p>
+              <br />
+              <p>
+                <span class="cm">// ── Symmetric: Local encryption ──</span>
+              </p>
+              <p>
+                <span class="kw">const</span> localKey <span class="op">=</span> v4.<span class="fn"
+                  >generate_v4_local_key</span
+                >();
+              </p>
+              <p>
+                <span class="kw">const</span> token <span class="op">=</span> v4.<span class="fn"
+                  >encrypt_v4_local</span
+                >(localKey, {
+              </p>
+              <p>&nbsp;sub: <span class="str">'user123'</span>,</p>
+              <p>
+                &nbsp;exp: Math.<span class="fn">floor</span>(Date.<span class="fn">now</span>()
+                <span class="op">/</span> <span class="num">1000</span>) <span class="op">+</span>
+                <span class="num">3600</span>
+              </p>
+              <p>});</p>
+              <p>
+                <span class="kw">const</span> decrypted <span class="op">=</span> v4.<span
+                  class="fn"
+                  >decrypt_v4_local</span
+                >(localKey, token);
+              </p>
+              <br />
+              <p>
+                <span class="cm">// ── Asymmetric: Public signing ──</span>
+              </p>
+              <p>
+                <span class="kw">const</span> kp <span class="op">=</span> v4.<span class="fn"
+                  >generate_v4_public_key_pair</span
+                >();
+              </p>
+              <p>
+                <span class="kw">const</span> signed <span class="op">=</span> v4.<span class="fn"
+                  >sign_v4_public</span
+                >(kp.secret, { user: <span class="str">'alice'</span> });
+              </p>
+              <p>
+                <span class="kw">const</span> verified <span class="op">=</span> v4.<span class="fn"
+                  >verify_v4_public</span
+                >(kp.public, signed);
+              </p>
+              <br />
+              <p>
+                <span class="cm">// ── PASERK serialization ──</span>
+              </p>
+              <p>
+                <span class="kw">const</span> paserk <span class="op">=</span> v4.<span class="fn"
+                  >key_to_paserk_local</span
+                >(localKey);
+              </p>
+              <p>
+                <span class="kw">const</span> restored <span class="op">=</span> v4.<span class="fn"
+                  >paserk_local_to_key</span
+                >(paserk);
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- VERSIONS -->
+    <section id="versions" class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">Versions</div>
+        <h2 class="section-title">Choose your algorithm</h2>
+        <p class="section-desc">v4 for new applications. v3 when FIPS compliance is required.</p>
+        <table class="version-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>PASETO v4</th>
+              <th>PASETO v3</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Local Algorithm</td>
+              <td>XChaCha20-Poly1305</td>
+              <td>AES-256-CTR + HMAC-SHA384</td>
+            </tr>
+            <tr>
+              <td>Public Algorithm</td>
+              <td>Ed25519</td>
+              <td>P-384 + ECDSA</td>
+            </tr>
+            <tr>
+              <td>Local Key Size</td>
+              <td>32 bytes (64 hex)</td>
+              <td>32 bytes (64 hex)</td>
+            </tr>
+            <tr>
+              <td>Secret Key Size</td>
+              <td>64 bytes (128 hex)</td>
+              <td>48 bytes (96 hex)</td>
+            </tr>
+            <tr>
+              <td>Public Key Size</td>
+              <td>32 bytes (64 hex)</td>
+              <td>49 bytes (98 hex)</td>
+            </tr>
+            <tr>
+              <td>Use Case</td>
+              <td>Modern applications <span class="recommended">Recommended</span></td>
+              <td>FIPS-compliant environments</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- API OVERVIEW -->
+    <section id="api" class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">API</div>
+        <h2 class="section-title">Core methods</h2>
+        <p class="section-desc">
+          Import v4 or v3 — the API surface is identical. Initialize WASM first, then call methods.
+        </p>
+        <div class="api-grid">
+          <div class="api-card">
+            <code>generate_v4_local_key()</code>
+            <p>
+              Generates a cryptographically secure random key for symmetric encryption. Returns a
+              64-character hex string.
+            </p>
+            <span class="tag local">local</span>
+          </div>
+          <div class="api-card">
+            <code>generate_v4_public_key_pair()</code>
+            <p>
+              Generates an Ed25519 key pair. Returns an object with <code>secret</code> (128 hex)
+              and <code>public</code> (64 hex).
+            </p>
+            <span class="tag public">public</span>
+          </div>
+          <div class="api-card">
+            <code>encrypt_v4_local(key, message, footer?)</code>
+            <p>
+              Encrypts using XChaCha20-Poly1305. Message can be a string or object. Returns
+              <code>v4.local.{payload}</code> token.
+            </p>
+            <span class="tag local">local</span>
+          </div>
+          <div class="api-card">
+            <code>decrypt_v4_local(key, token, footer?)</code>
+            <p>
+              Decrypts a local token. Throws if key is invalid, token tampered, or wrong key used.
+            </p>
+            <span class="tag local">local</span>
+          </div>
+          <div class="api-card">
+            <code>sign_v4_public(secret, message, footer?)</code>
+            <p>
+              Signs using Ed25519. Message is visible — provides authentication and integrity, not
+              secrecy.
+            </p>
+            <span class="tag public">public</span>
+          </div>
+          <div class="api-card">
+            <code>verify_v4_public(public, token, footer?)</code>
+            <p>Verifies a public token. Throws if signature is invalid or key doesn't match.</p>
+            <span class="tag public">public</span>
+          </div>
+          <div class="api-card">
+            <code>key_to_paserk_local(key_hex)</code>
+            <p>
+              Converts a local key to PASERK format: <code>k4.local.{data}</code>. Standardized key
+              serialization.
+            </p>
+            <span class="tag local">paserk</span>
+          </div>
+          <div class="api-card">
+            <code>get_local_key_id(key_hex)</code>
+            <p>
+              Returns a key identifier in format <code>k4.lid.{hash}</code>. Identify keys without
+              exposing material.
+            </p>
+            <span class="tag local">key-id</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"><hr /></div>
+
+    <!-- BUILT WITH -->
+    <section class="reveal-section">
+      <div class="section-inner">
+        <div class="section-label">Built With</div>
+        <h2 class="section-title" style="font-size: 28px">Dependencies</h2>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; margin-top: 24px">
+          <a
+            href="https://github.com/wasm-bindgen/wasm-bindgen"
+            target="_blank"
+            rel="noopener"
+            class="feature-card"
+            style="display: block; padding: 16px 24px; text-decoration: none"
+          >
+            <h3 style="font-size: 15px">wasm-bindgen</h3>
+            <p style="font-size: 13px">Rust ↔ JavaScript communication</p>
+          </a>
+          <a
+            href="https://github.com/rrrodzilla/rusty_paseto"
+            target="_blank"
+            rel="noopener"
+            class="feature-card"
+            style="display: block; padding: 16px 24px; text-decoration: none"
+          >
+            <h3 style="font-size: 15px">rusty-paseto</h3>
+            <p style="font-size: 13px">PASETO implementation in Rust</p>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <p>
+          Built with 🦀🕸 by
+          <a href="https://achmadk.com" target="_blank" rel="noopener">Achmad Kurnianto</a> · MIT
+          License
+        </p>
+        <div class="footer-links">
+          <a href="https://github.com/achmadk/paseto-wasm" target="_blank" rel="noopener">GitHub</a>
+          <a
+            href="https://github.com/achmadk/paseto-wasm/blob/main/contributing.md"
+            target="_blank"
+            rel="noopener"
+            >Contributing</a
+          >
+          <a
+            href="https://github.com/achmadk/paseto-wasm/blob/main/code_of_conduct.md"
+            target="_blank"
+            rel="noopener"
+            >Code of Conduct</a
+          >
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      function copyInstall() {
+        const cmd = document.getElementById("install-cmd").textContent;
+        navigator.clipboard.writeText(cmd).then(() => {
+          const btn = document.querySelector(".copy-btn");
+          btn.innerHTML =
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+          btn.style.color = "#2dd4a8";
+          setTimeout(() => {
+            btn.innerHTML =
+              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+            btn.style.color = "";
+          }, 2000);
+        });
+      }
+
+      /* ---- Hero entrance animation (respects prefers-reduced-motion) ---- */
+      (function () {
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+        if (mq.matches) return;
+
+        const elements = [
+          { el: document.querySelector(".hero-badge"), delay: 200 },
+          { el: document.querySelector(".hero h1"), delay: 400 },
+          { el: document.querySelector(".hero-sub"), delay: 650 },
+          { el: document.querySelector(".hero-actions"), delay: 850 },
+          { el: document.querySelector(".hero .code-block"), delay: 1050 },
+        ];
+
+        function animateHero() {
+          elements.forEach(function (item) {
+            if (!item.el) return;
+            setTimeout(function () {
+              item.el.style.transition =
+                "opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1), transform 0.6s cubic-bezier(0.16, 1, 0.3, 1)";
+              item.el.style.opacity = "1";
+              item.el.style.transform = "translateY(0)";
+            }, item.delay);
+          });
+        }
+
+        /* Wait for fonts to avoid layout shift during animation */
+        document.fonts.ready.then(function () {
+          requestAnimationFrame(animateHero);
+        });
+      })();
+
+      /* ---- Scroll reveal for sections ---- */
+      (function () {
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+        if (mq.matches) {
+          document.querySelectorAll(".reveal-section").forEach(function (el) {
+            el.classList.add("visible");
+          });
+          return;
+        }
+
+        const observer = new IntersectionObserver(
+          function (entries) {
+            entries.forEach(function (entry) {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("visible");
+                observer.unobserve(entry.target);
+              }
+            });
+          },
+          { threshold: 0.12, rootMargin: "0px 0px -40px 0px" },
+        );
+
+        document.querySelectorAll(".reveal-section").forEach(function (el) {
+          observer.observe(el);
+        });
+      })();
+
+      /* ---- Hero canvas: Matrix-style cryptographic text rain ── runs in Web Worker via OffscreenCanvas ---- */
+      (function () {
+        const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+        if (mq.matches) return;
+
+        const canvas = document.getElementById("hero-canvas");
+        if (!canvas) return;
+
+        /* Feature detection: OffscreenCanvas + transferControlToOffscreen */
+        if (typeof canvas.transferControlToOffscreen !== "function") {
+          /* Fallback: animation disabled — browser does not support OffscreenCanvas */
+          return;
+        }
+
+        const dpr = window.devicePixelRatio || 1;
+        let worker;
+
+        try {
+          worker = new Worker("hero-canvas.worker.js", { type: "module" });
+        } catch (e) {
+          /* Fallback for browsers that don't support module workers */
+          worker = new Worker("hero-canvas.worker.js");
+        }
+
+        const offscreen = canvas.transferControlToOffscreen();
+        worker.postMessage(
+          {
+            canvas: offscreen,
+            dpr: dpr,
+            resize: true,
+            width: canvas.parentElement.offsetWidth,
+            height: canvas.parentElement.offsetHeight,
+          },
+          [offscreen],
+        );
+
+        function sendResize() {
+          if (worker) {
+            worker.postMessage({
+              resize: true,
+              width: canvas.parentElement.offsetWidth,
+              height: canvas.parentElement.offsetHeight,
+            });
+          }
+        }
+
+        /* Re-initialise columns on resize */
+        window.addEventListener("resize", sendResize);
+      })();
+    </script>
+  </body>
+</html>
