@@ -31,6 +31,7 @@
 //! - `k3.lid.*`, `k3.pid.*`, `k3.sid.*` - Key IDs
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use js_sys::Array;
 use p384::{
     ecdsa::{
         signature::{Signer, Verifier},
@@ -38,10 +39,11 @@ use p384::{
     },
     elliptic_curve::rand_core::OsRng,
 };
+#[cfg(feature = "threads")]
+use rayon::prelude::*;
 use rusty_paseto_v3::core::{
     Footer, ImplicitAssertion, Key, Local, Paseto, PasetoNonce, PasetoSymmetricKey, Payload, V3,
 };
-use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 
 const V3_PUBLIC_HEADER: &str = "v3.public.";
@@ -276,9 +278,6 @@ pub fn verify_v3_public(
     footer: Option<String>,
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
-    if !token.starts_with(V3_PUBLIC_HEADER) {
-        return Err(JsValue::from_str("Invalid token header"));
-    }
     let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
 
     let verifying_key = VerifyingKey::from_sec1_bytes(&key_vec)
@@ -287,12 +286,175 @@ pub fn verify_v3_public(
     let footer_str = footer.unwrap_or_default();
     let implicit = implicit_assertion.unwrap_or_default();
 
-    // Token format: v3.public.{m||sig}.{footer}
-    // Split at the last dot to separate footer
-    let after_header = &token[V3_PUBLIC_HEADER.len()..];
+    verify_v3_token_internal(&verifying_key, &key_vec, token, &footer_str, &implicit)
+        .map_err(|e| JsValue::from_str(&e))
+}
 
-    // Find the last dot - everything after is the footer
-    let (encoded_payload, _token_footer) = match after_header.rfind('.') {
+/// Signs a batch of messages using V3 Public (ECDSA P-384).
+///
+/// @param {string} secretKeyHex - 48-byte secret key as hex
+/// @param {Array<string|object>} messages - Payloads to sign
+/// @param {string|null} footer - Optional footer
+/// @param {string|null} implicitAssertion - Optional implicit assertion
+/// @returns {Array<string>} Tokens
+#[wasm_bindgen]
+pub fn sign_v3_public_batch(
+    secret_key_hex: &str,
+    messages: &Array,
+    footer: Option<String>,
+    implicit_assertion: Option<String>,
+) -> Result<Array, JsValue> {
+    let key_vec = crate::common::decode_hex_key(secret_key_hex, 48)?;
+    let signing_key =
+        SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
+    let verifying_key = VerifyingKey::from(&signing_key);
+    let pk_bytes = verifying_key.to_encoded_point(true);
+    let pk_slice = pk_bytes.as_bytes();
+
+    let footer_str = footer.unwrap_or_default();
+    let implicit = implicit_assertion.unwrap_or_default();
+
+    let mut message_strs = Vec::with_capacity(messages.length() as usize);
+    for i in 0..messages.length() {
+        let msg = messages.get(i);
+        message_strs.push(crate::common::serialize_message(msg)?);
+    }
+
+    #[cfg(feature = "threads")]
+    let results: Vec<Result<String, String>> = message_strs
+        .par_iter()
+        .map(|message_str| {
+            let pre_auth = pae(&[
+                pk_slice,
+                V3_PUBLIC_HEADER.as_bytes(),
+                message_str.as_bytes(),
+                footer_str.as_bytes(),
+                implicit.as_bytes(),
+            ]);
+
+            let signature: Signature = signing_key.sign(&pre_auth);
+            let sig_bytes = signature.to_bytes();
+
+            let mut payload = Vec::new();
+            payload.extend_from_slice(message_str.as_bytes());
+            payload.extend_from_slice(&sig_bytes);
+
+            Ok(format!(
+                "{}{}",
+                V3_PUBLIC_HEADER,
+                URL_SAFE_NO_PAD.encode(&payload)
+            ))
+        })
+        .collect();
+
+    #[cfg(not(feature = "threads"))]
+    let results: Vec<Result<String, String>> = message_strs
+        .iter()
+        .map(|message_str| {
+            let pre_auth = pae(&[
+                pk_slice,
+                V3_PUBLIC_HEADER.as_bytes(),
+                message_str.as_bytes(),
+                footer_str.as_bytes(),
+                implicit.as_bytes(),
+            ]);
+
+            let signature: Signature = signing_key.sign(&pre_auth);
+            let sig_bytes = signature.to_bytes();
+
+            let mut payload = Vec::new();
+            payload.extend_from_slice(message_str.as_bytes());
+            payload.extend_from_slice(&sig_bytes);
+
+            Ok(format!(
+                "{}{}",
+                V3_PUBLIC_HEADER,
+                URL_SAFE_NO_PAD.encode(&payload)
+            ))
+        })
+        .collect();
+
+    let out_array = Array::new();
+    for res in results {
+        match res {
+            Ok(token) => out_array.push(&JsValue::from_str(&token)),
+            Err(e) => return Err(JsValue::from_str(&e)),
+        };
+    }
+
+    Ok(out_array)
+}
+
+/// Verifies a batch of V3 Public tokens (ECDSA P-384).
+///
+/// @param {string} publicKeyHex - 49-byte public key as hex
+/// @param {Array<string>} tokens - Signed tokens
+/// @param {string|null} footer - Footer used during signing
+/// @param {string|null} implicitAssertion - Implicit assertion used during signing
+/// @returns {Array<string>} Verified messages
+#[wasm_bindgen]
+pub fn verify_v3_public_batch(
+    public_key_hex: &str,
+    tokens: &Array,
+    footer: Option<String>,
+    implicit_assertion: Option<String>,
+) -> Result<Array, JsValue> {
+    let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
+    let verifying_key = VerifyingKey::from_sec1_bytes(&key_vec)
+        .map_err(|_| JsValue::from_str("Invalid public key"))?;
+
+    let footer_str = footer.unwrap_or_default();
+    let implicit = implicit_assertion.unwrap_or_default();
+
+    let mut token_strs = Vec::with_capacity(tokens.length() as usize);
+    for i in 0..tokens.length() {
+        if let Some(s) = tokens.get(i).as_string() {
+            token_strs.push(s);
+        } else {
+            return Err(JsValue::from_str("All tokens must be strings"));
+        }
+    }
+
+    #[cfg(feature = "threads")]
+    let results: Vec<Result<String, String>> = token_strs
+        .par_iter()
+        .map(|token| {
+            verify_v3_token_internal(&verifying_key, &key_vec, token, &footer_str, &implicit)
+        })
+        .collect();
+
+    #[cfg(not(feature = "threads"))]
+    let results: Vec<Result<String, String>> = token_strs
+        .iter()
+        .map(|token| {
+            verify_v3_token_internal(&verifying_key, &key_vec, token, &footer_str, &implicit)
+        })
+        .collect();
+
+    let out_array = Array::new();
+    for res in results {
+        match res {
+            Ok(msg) => out_array.push(&JsValue::from_str(&msg)),
+            Err(e) => return Err(JsValue::from_str(&e)),
+        };
+    }
+
+    Ok(out_array)
+}
+
+fn verify_v3_token_internal(
+    verifying_key: &VerifyingKey,
+    key_vec: &[u8],
+    token: &str,
+    footer_str: &str,
+    implicit: &str,
+) -> Result<String, String> {
+    if !token.starts_with(V3_PUBLIC_HEADER) {
+        return Err("Invalid token header".to_string());
+    }
+
+    let after_header = &token[V3_PUBLIC_HEADER.len()..];
+    let (encoded_payload, _) = match after_header.rfind('.') {
         Some(pos) => {
             let payload_part = &after_header[..pos];
             let token_footer = &after_header[pos + 1..];
@@ -303,10 +465,10 @@ pub fn verify_v3_public(
 
     let payload = URL_SAFE_NO_PAD
         .decode(encoded_payload)
-        .map_err(|e| JsValue::from_str(&format!("Base64 Error: {}", e)))?;
+        .map_err(|e| format!("Base64 Error: {}", e))?;
 
     if payload.len() < SIG_SIZE {
-        return Err(JsValue::from_str("Token too short"));
+        return Err("Token too short".to_string());
     }
 
     let message_len = payload.len() - SIG_SIZE;
@@ -314,25 +476,22 @@ pub fn verify_v3_public(
     let sig_bytes = &payload[message_len..];
 
     let pre_auth = pae(&[
-        &key_vec,
+        key_vec,
         V3_PUBLIC_HEADER.as_bytes(),
         message_bytes,
         footer_str.as_bytes(),
         implicit.as_bytes(),
     ]);
 
-    let signature = Signature::from_slice(sig_bytes)
-        .map_err(|_| JsValue::from_str("Invalid signature format"))?;
+    let signature =
+        Signature::from_slice(sig_bytes).map_err(|_| "Invalid signature format".to_string())?;
 
     verifying_key
         .verify(&pre_auth, &signature)
-        .map_err(|_| JsValue::from_str("Signature verification failed"))?;
+        .map_err(|_| "Signature verification failed".to_string())?;
 
-    String::from_utf8(message_bytes.to_vec())
-        .map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
+    String::from_utf8(message_bytes.to_vec()).map_err(|_| "Message is not valid UTF-8".to_string())
 }
-
-/// Converts a V3 local key to PASERK format.
 ///
 /// @example
 /// ```javascript

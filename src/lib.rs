@@ -103,4 +103,8 @@ pub mod v4;
 #[cfg(feature = "v3")]
 pub mod v3;
 
+#[cfg(feature = "v5")]
+pub mod v5;
+
 pub mod common;
+pub mod worker;

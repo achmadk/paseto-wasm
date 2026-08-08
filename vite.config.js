@@ -1,17 +1,22 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite-plus";
+import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-    plugins: [react()],
-    server: {
-        port: 3000,
+  staged: {
+    "*": "vp check --fix",
+  },
+  fmt: {},
+  lint: { options: { typeAware: true, typeCheck: true } },
+  plugins: [react()],
+  server: {
+    port: 3000,
+  },
+  build: {
+    target: "esnext",
+  },
+  resolve: {
+    alias: {
+      "paseto-wasm": "./pkg/paseto_wasm.js",
     },
-    build: {
-        target: 'esnext',
-    },
-    resolve: {
-        alias: {
-            'paseto-wasm': './pkg/paseto_wasm.js',
-        },
-    },
-})
+  },
+});

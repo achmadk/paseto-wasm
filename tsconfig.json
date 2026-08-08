@@ -1,19 +1,12 @@
 {
-    "compilerOptions": {
-        "target": "ESNext",
-        "module": "ESNext",
-        "moduleResolution": "bundler",
-        "lib": [
-            "ESNext",
-            "DOM"
-        ],
-        "strict": true,
-        "skipLibCheck": true,
-        "jsx": "react-jsx"
-    },
-    "include": [
-        "pkg/**/*.d.ts",
-        "src/**/*.ts",
-        "**/*.tsx"
-    ]
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["pkg/**/*.d.ts", "src/**/*.ts", "**/*.tsx"]
 }

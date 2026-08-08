@@ -2,5 +2,26 @@ onlyBuiltDependencies:
   - esbuild
 
 packages:
-  - 'examples/*'
+  - "examples/*"
   - .
+catalog:
+  vite: npm:@voidzero-dev/vite-plus-core@latest
+  vitest: npm:@voidzero-dev/vite-plus-test@latest
+  vite-plus: latest
+overrides:
+  vite: "catalog:"
+  vitest: "catalog:"
+peerDependencyRules:
+  allowAny:
+    - vite
+    - vitest
+  allowedVersions:
+    vite: "*"
+    vitest: "*"
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - miniflare@5.20260801.0-alpha
+  - wrangler@4.119.0

@@ -1,14 +1,16 @@
 <div align="center">
 
   <h1>PASETO Rust WASM (<code>paseto-wasm</code>)</h1>
-  
-  <strong>Enable PASETO in JavaScript browsers using <a href="https://webassembly.org/">WebAssembly (WASM)</a></strong>
+
+<strong>Enable PASETO in JavaScript browsers using <a href="https://webassembly.org/">WebAssembly (WASM)</a></strong>
 
   <!-- <p>
     <a href="https://travis-ci.org/rustwasm/wasm-pack-template"><img src="https://img.shields.io/travisci/rustwasm/wasm-pack-template.svg?style=flat-square" alt="Build Status" /></a>
   </p>
   -->
-  <sub>Built with 🦀🕸 by <a href="https://achmadk.com">Achmad Kurnianto</a></sub>
+
+<sub>Built with 🦀🕸 by <a href="https://achmadk.com">Achmad Kurnianto</a></sub>
+
 </div>
 
 ## 🌄 Background
@@ -41,11 +43,11 @@ bun add paseto-wasm          # bun
 
 ```javascript
 // PASETO v4
-import initV4, * as v4 from 'paseto-wasm'; // OR
-import initV4, * as v4 from 'paseto-wasm/v4';
+import initV4, * as v4 from "paseto-wasm"; // OR
+import initV4, * as v4 from "paseto-wasm/v4";
 
 // PASETO v3
-import initV3, * as v3 from 'paseto-wasm/v3';
+import initV3, * as v3 from "paseto-wasm/v3";
 
 // init WASM first before using other methods
 await initV4(); // OR
@@ -55,12 +57,12 @@ await initV3();
 const localKey = v4.generate_v4_local_key();
 
 // Encrypt a message (local key - symmetric encryption)
-const token = v4.encrypt_v4_local(localKey, { data: 'Hello PASETO!' });
+const token = v4.encrypt_v4_local(localKey, { data: "Hello PASETO!" });
 const decrypted = v4.decrypt_v4_local(localKey, token);
 
 // Or use asymmetric keys for signing
 const keyPair = v4.generate_v4_public_key_pair();
-const signedToken = v4.sign_v4_public(keyPair.secret, { user: 'alice' });
+const signedToken = v4.sign_v4_public(keyPair.secret, { user: "alice" });
 const verified = v4.verify_v4_public(keyPair.public, signedToken);
 ```
 
@@ -70,10 +72,10 @@ const verified = v4.verify_v4_public(keyPair.public, signedToken);
 
 ### PASETO Versions
 
-| Version | Algorithm (Local) | Algorithm (Public) | Use Case |
-|---------|-----------------|-------------------|----------|
-| v4 | XChaCha20-Poly1305 | Ed25519 | Modern applications (default) |
-| v3 | AES-256-CTR + HMAC-SHA384 | P-384 + ECDSA | FIPS-compliant environments |
+| Version | Algorithm (Local)         | Algorithm (Public) | Use Case                      |
+| ------- | ------------------------- | ------------------ | ----------------------------- |
+| v4      | XChaCha20-Poly1305        | Ed25519            | Modern applications (default) |
+| v3      | AES-256-CTR + HMAC-SHA384 | P-384 + ECDSA      | FIPS-compliant environments   |
 
 **Recommendation**: Use v4 for new applications. Use v3 only when required for FIPS compliance.
 
@@ -99,13 +101,14 @@ const key = v4.generate_v4_local_key();
 Generates a new Ed25519 key pair for public signing/verification.
 
 **Returns**: `KeyPair` object with:
+
 - `secret`: 128-character hex string (64 bytes) - Keep secret!
 - `public`: 64-character hex string (32 bytes)
 
 ```javascript
 const keyPair = v4.generate_v4_public_key_pair();
 console.log(keyPair.secret); // "a1b2...c3d4" (128 hex)
-console.log(keyPair.public);  // "e5f6...g7h8" (64 hex)
+console.log(keyPair.public); // "e5f6...g7h8" (64 hex)
 ```
 
 ---
@@ -117,6 +120,7 @@ console.log(keyPair.public);  // "e5f6...g7h8" (64 hex)
 Encrypts a message using XChaCha20-Poly1305.
 
 **Parameters**:
+
 - `key_hex` (string, required): 64-character hex string (32 bytes)
 - `message` (string \| object, required): Message to encrypt
 - `footer` (string, optional): Additional footer data
@@ -129,7 +133,7 @@ Encrypts a message using XChaCha20-Poly1305.
 const token1 = v4.encrypt_v4_local(key, "Hello World");
 
 // With object message (serialized as JSON)
-const token2 = v4.encrypt_v4_local(key, { user: 'alice', role: 'admin' });
+const token2 = v4.encrypt_v4_local(key, { user: "alice", role: "admin" });
 
 // With footer
 const token3 = v4.encrypt_v4_local(key, "secret", "footer-data");
@@ -140,6 +144,7 @@ const token3 = v4.encrypt_v4_local(key, "secret", "footer-data");
 Decrypts a PASETO v4 local token.
 
 **Parameters**:
+
 - `key_hex` (string, required): 64-character hex string (32 bytes)
 - `token` (string, required): The PASETO token to decrypt
 - `footer` (string, optional): Must match what was used during encryption
@@ -163,6 +168,7 @@ const decrypted = v4.decrypt_v4_local(key, token);
 Signs a message using Ed25519. The message is visible in the token - this provides authentication/integrity, NOT secrecy.
 
 **Parameters**:
+
 - `secret_key_hex` (string, required): 128-character hex string (64 bytes)
 - `message` (string \| object, required): Message to sign
 - `footer` (string, optional): Additional footer data
@@ -172,7 +178,7 @@ Signs a message using Ed25519. The message is visible in the token - this provid
 
 ```javascript
 const keyPair = v4.generate_v4_public_key_pair();
-const token = v4.sign_v4_public(keyPair.secret, { user: 'alice' });
+const token = v4.sign_v4_public(keyPair.secret, { user: "alice" });
 // token: "v4.public.eyJ1c2VyIjoiYWxpY2UifQ..."
 ```
 
@@ -181,6 +187,7 @@ const token = v4.sign_v4_public(keyPair.secret, { user: 'alice' });
 Verifies a PASETO v4 public token.
 
 **Parameters**:
+
 - `public_key_hex` (string, required): 64-character hex string (32 bytes)
 - `token` (string, required): The PASETO token to verify
 - `footer` (string, optional): Must match what was used during signing
@@ -190,7 +197,7 @@ Verifies a PASETO v4 public token.
 
 ```javascript
 const keyPair = v4.generate_v4_public_key_pair();
-const token = v4.sign_v4_public(keyPair.secret, { user: 'alice' });
+const token = v4.sign_v4_public(keyPair.secret, { user: "alice" });
 const verified = v4.verify_v4_public(keyPair.public, token);
 // verified: '{"user":"alice"}'
 
@@ -268,16 +275,16 @@ Access via `import * as v3 from 'paseto-wasm/v3'`
 
 The v3 API is identical to v4 but uses different key sizes:
 
-| Key Type | v4 Size | v3 Size |
-|---------|---------|---------|
-| Local Key | 32 bytes (64 hex) | 32 bytes (64 hex) |
+| Key Type   | v4 Size            | v3 Size           |
+| ---------- | ------------------ | ----------------- |
+| Local Key  | 32 bytes (64 hex)  | 32 bytes (64 hex) |
 | Secret Key | 64 bytes (128 hex) | 48 bytes (96 hex) |
-| Public Key | 32 bytes (64 hex) | 49 bytes (98 hex) |
+| Public Key | 32 bytes (64 hex)  | 49 bytes (98 hex) |
 
 #### v3 Key Generation
 
 ```javascript
-import * as v3 from 'paseto-wasm/v3';
+import * as v3 from "paseto-wasm/v3";
 
 const localKey = v3.generate_v3_local_key();
 const keyPair = v3.generate_v3_public_key_pair();
@@ -300,12 +307,12 @@ All functions throw JavaScript errors with descriptive messages:
 try {
   const decrypted = v4.decrypt_v4_local(key, token);
 } catch (error) {
-  if (error.message.includes('Key must be')) {
-    console.error('Invalid key length');
-  } else if (error.message.includes('Decryption failed')) {
-    console.error('Wrong key or tampered token');
+  if (error.message.includes("Key must be")) {
+    console.error("Invalid key length");
+  } else if (error.message.includes("Decryption failed")) {
+    console.error("Wrong key or tampered token");
   } else {
-    console.error('Unknown error:', error);
+    console.error("Unknown error:", error);
   }
 }
 ```
@@ -321,8 +328,8 @@ try {
 
 ```javascript
 const claims = {
-  sub: 'user123',
-  exp: Math.floor(Date.now() / 1000) + 3600  // expires in 1 hour
+  sub: "user123",
+  exp: Math.floor(Date.now() / 1000) + 3600, // expires in 1 hour
 };
 const token = v4.sign_v4_public(secretKey, claims);
 ```

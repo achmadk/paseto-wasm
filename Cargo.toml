@@ -12,8 +12,10 @@ categories = ["development-tools"]
 
 [features]
 default = ["v4"]
+v5 = []
 v4 = []
-v3 = ["dep:rusty_paseto_v3"]
+v3 = ["dep:rusty_paseto_v3", "dep:p384", "dep:ring"]
+threads = ["dep:wasm_thread", "dep:rayon"]
 
 [lib]
 
@@ -21,23 +23,43 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-rusty_paseto = { version = "0.9", features = ["v4_local", "v4_public", "generic", "paserk"] }
-rusty_paseto_v3 = { version = "0.9", git = "https://github.com/rrrodzilla/rusty_paseto", package = "rusty_paseto", features = ["v3_local", "v3_public", "generic", "paserk"], optional = true, default-features = false }
+rusty_paseto = { version = "0.10", optional = true, features = [
+  "v4_local",
+  "v4_public",
+  "generic",
+  "paserk",
+] }
+rusty_paseto_v3 = { version = "0.10", git = "https://github.com/rrrodzilla/rusty_paseto", package = "rusty_paseto", features = [
+  "v3_local",
+  "v3_public",
+  "generic",
+  "paserk",
+], optional = true, default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-wasm-bindgen = "0.6"
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+p384 = { version = "0.13", features = ["std", "ecdsa"], optional = true }
 hex = "0.4"
-ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"] }
-ed25519-dalek = "2.2"
-rand = "0.8"
-base64 = "0.22"
+ed25519-dalek = "3.0"
+subtle = "2.6"
+base64 = "0.23"
 blake2 = "0.10"
-aes = "0.9"
-ctr = "0.10"
-hmac = "0.13"
-sha2 = "0.11"
-p384 = { version = "0.13", features = ["std", "pem"] }
-hkdf = "0.13"
+chacha20 = "0.10.1"
+chacha20poly1305 = "0.11.0"
+wasm-bindgen-futures = "0.4.76"
+js-sys = "0.3.103"
+web-sys = "0.3.103"
+wasm_thread = { version = "0.3.3", optional = true }
+rayon = { version = "1.12.0", optional = true }
+# ring only implements SecureRandom for SystemRandom on wasm32-unknown-unknown
+# with this feature; rusty_paseto (v3) depends on it at runtime.
+ring = { version = "0.17", features = ["wasm32_unknown_unknown_js"], optional = true }
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+
+# getrandom 0.3 (transitive via paserk -> rand_core 0.9) fails to compile on
+# wasm32-unknown-unknown without its JS backend; the direct dependency lifts the
+# feature for the whole graph. (getrandom 0.2 is lifted via ring's feature above.)
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom_wasm_js = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

@@ -2,6 +2,8 @@
 use paseto_wasm::v3;
 #[cfg(feature = "v4")]
 use paseto_wasm::v4;
+#[cfg(feature = "v5")]
+use paseto_wasm::v5;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::*;
 
@@ -173,5 +175,121 @@ fn test_v3_public_wrong_key_fails() {
 
     // Verification with wrong key should fail
     let result = v3::verify_v3_public(&key_pair2.public(), &token, None, None);
+    assert!(result.is_err());
+}
+
+// ============ V5 Tests ============
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_public() {
+    let key_pair = v5::generate_v5_public_key_pair();
+    let message = JsValue::from_str("hello v5 public");
+
+    let token =
+        v5::sign_v5_public(&key_pair.secret(), message.clone(), None, None).expect("sign failed");
+    let verified =
+        v5::verify_v5_public(&key_pair.public(), &token, None, None).expect("verify failed");
+
+    assert_eq!(verified, "hello v5 public");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_public_with_footer() {
+    let key_pair = v5::generate_v5_public_key_pair();
+    let message = JsValue::from_str("hello v5 public with footer");
+    let footer = Some("v5-public-footer".to_string());
+
+    let token = v5::sign_v5_public(&key_pair.secret(), message.clone(), footer.clone(), None)
+        .expect("sign failed");
+    let verified =
+        v5::verify_v5_public(&key_pair.public(), &token, footer, None).expect("verify failed");
+
+    assert_eq!(verified, "hello v5 public with footer");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_public_wrong_key_fails() {
+    let key_pair1 = v5::generate_v5_public_key_pair();
+    let key_pair2 = v5::generate_v5_public_key_pair();
+    let message = JsValue::from_str("test v5 message");
+
+    let token = v5::sign_v5_public(&key_pair1.secret(), message, None, None).expect("sign failed");
+
+    let result = v5::verify_v5_public(&key_pair2.public(), &token, None, None);
+    assert!(result.is_err());
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_paserk() {
+    // Test local key PASERK
+    let key = v5::generate_v5_local_key();
+    let paserk_local = v5::key_to_paserk_v5_local(&key).expect("pasERK local");
+    assert!(paserk_local.starts_with("k5.local."));
+    let key_back = v5::paserk_v5_local_to_key(&paserk_local).expect("key back");
+    assert_eq!(key, key_back);
+
+    let kid = v5::get_v5_local_key_id(&key).expect("kid");
+    assert!(kid.starts_with("k5.lid."));
+
+    // Test public key PASERK
+    let kp = v5::generate_v5_public_key_pair();
+    let paserk_pub = v5::key_to_paserk_v5_public(&kp.public()).expect("paserk public");
+    assert!(paserk_pub.starts_with("k5.public."));
+    let pub_back = v5::paserk_v5_public_to_key(&paserk_pub).expect("pub back");
+    assert_eq!(kp.public(), pub_back);
+
+    let pid = v5::get_v5_public_key_id(&kp.public()).expect("pid");
+    assert!(pid.starts_with("k5.pid."));
+
+    // Test secret key PASERK
+    let paserk_secret = v5::key_to_paserk_v5_secret(&kp.secret()).expect("paserk secret");
+    assert!(paserk_secret.starts_with("k5.secret."));
+    let secret_back = v5::paserk_v5_secret_to_key(&paserk_secret).expect("secret back");
+    assert_eq!(kp.secret(), secret_back);
+
+    let sid = v5::get_v5_secret_key_id(&kp.secret()).expect("sid");
+    assert!(sid.starts_with("k5.sid."));
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local() {
+    let key = v5::generate_v5_local_key();
+    let message = JsValue::from_str("hello v5 local");
+
+    let token = v5::encrypt_v5_local(&key, message.clone(), None, None).expect("encrypt failed");
+    let decrypted = v5::decrypt_v5_local(&key, &token, None, None).expect("decrypt failed");
+
+    assert_eq!(decrypted, "hello v5 local");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local_with_footer() {
+    let key = v5::generate_v5_local_key();
+    let message = JsValue::from_str("hello local footer");
+    let footer = Some("test-footer".to_string());
+
+    let token =
+        v5::encrypt_v5_local(&key, message.clone(), footer.clone(), None).expect("encrypt failed");
+    let decrypted = v5::decrypt_v5_local(&key, &token, footer, None).expect("decrypt failed");
+
+    assert_eq!(decrypted, "hello local footer");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local_wrong_key_fails() {
+    let key1 = v5::generate_v5_local_key();
+    let key2 = v5::generate_v5_local_key();
+    let message = JsValue::from_str("wrong key test");
+
+    let token = v5::encrypt_v5_local(&key1, message.clone(), None, None).expect("encrypt failed");
+    let result = v5::decrypt_v5_local(&key2, &token, None, None);
+
     assert!(result.is_err());
 }
