@@ -7,6 +7,7 @@ use crate::PasetoClaims;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use blake2::digest::consts::U33;
 use blake2::{Blake2b, Digest};
+use subtle::ConstantTimeEq;
 use wasm_bindgen::prelude::*;
 
 /// Decodes a hex-encoded string and validates the key length.
@@ -160,4 +161,87 @@ pub fn paserk_id_from_bytes(key_bytes: &[u8], usage_header: &str, id_header: &st
 
     let encoded = URL_SAFE_NO_PAD.encode(&hash);
     format!("{}{}", id_header, encoded)
+}
+
+/// Pre-Authentication Encoding (PAE) as defined by the PASETO specification.
+///
+/// Encodes `pieces.len()` followed by each piece length-prefixed as
+/// little-endian u64 (with high bit cleared for spec compatibility).
+pub fn pae_encode(pieces: &[&[u8]]) -> Vec<u8> {
+    fn le64(mut n: u64) -> [u8; 8] {
+        n &= 0x7FFF_FFFF_FFFF_FFFF;
+        let mut out = [0u8; 8];
+        for b in out.iter_mut() {
+            *b = (n & 0xFF) as u8;
+            n >>= 8;
+        }
+        out
+    }
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&le64(pieces.len() as u64));
+    for piece in pieces {
+        out.extend_from_slice(&le64(piece.len() as u64));
+        out.extend_from_slice(piece);
+    }
+    out
+}
+
+/// Constant-time equality for authentication tags / footers.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    bool::from(a.ct_eq(b))
+}
+
+/// Formats a PASETO token: `header + base64url(raw) [+ "." + base64url(footer)]`.
+pub fn format_token(header: &str, payload_b64: &str, footer: &Option<String>) -> String {
+    match footer {
+        Some(f) => format!("{}{}.{}", header, payload_b64, URL_SAFE_NO_PAD.encode(f.as_bytes())),
+        None => format!("{}{}", header, payload_b64),
+    }
+}
+
+/// Parses a PASETO token, verifying the header and footer.
+///
+/// Returns the base64url-decoded raw payload bytes.
+pub fn parse_token(
+    token: &str,
+    header: &str,
+    footer: &Option<String>,
+) -> Result<Vec<u8>, JsValue> {
+    if token.len() > 64 * 1024 {
+        return Err(JsValue::from_str("Token too large"));
+    }
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 && parts.len() != 4 {
+        return Err(JsValue::from_str("Invalid token format"));
+    }
+    let expected_prefix: Vec<&str> = header.split('.').collect();
+    // header like "v4.local." splits into ["v4", "local", ""]
+    if parts.len() < 3 || parts[0] != expected_prefix[0] || parts[1] != expected_prefix[1] {
+        return Err(JsValue::from_str("Invalid token header"));
+    }
+    let payload_b64 = parts[2];
+    if parts.len() == 4 {
+        let token_footer_b64 = parts[3];
+        if token_footer_b64.len() > 1024 {
+            return Err(JsValue::from_str("Footer too large"));
+        }
+        let expected_b64 = match footer {
+            Some(f) => URL_SAFE_NO_PAD.encode(f.as_bytes()),
+            None => String::new(),
+        };
+        if !constant_time_eq(token_footer_b64.as_bytes(), expected_b64.as_bytes()) {
+            return Err(JsValue::from_str("Footer mismatch"));
+        }
+    } else if let Some(f) = footer {
+        if !f.is_empty() {
+            return Err(JsValue::from_str("Footer mismatch"));
+        }
+    }
+    URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .map_err(|e| JsValue::from_str(&format!("Base64 decode error: {}", e)))
 }

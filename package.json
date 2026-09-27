@@ -9,15 +9,21 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:wasm": "rimraf pkg && pnpm run build:wasm:web && pnpm run build:wasm:node && pnpm run build:wasm:web:v3 && pnpm run build:wasm:node:v3",
+    "build:wasm": "rimraf pkg && pnpm run build:wasm:web && pnpm run build:wasm:node && pnpm run build:wasm:web:v3 && pnpm run build:wasm:node:v3 && pnpm run build:wasm:memory64 && pnpm run build:wasm:memory64:node && pnpm run build:wasm:memory64:v3",
     "build:wasm:web": "wasm-pack build --target web",
     "build:wasm:web:v3": "mkdirp pkg/v3 && wasm-pack build --target web --out-dir pkg/v3 --features v3 --no-default-features",
     "build:wasm:node": "mkdirp pkg/cjs && wasm-pack build --target nodejs --out-dir pkg/cjs && shx mv pkg/cjs/paseto_wasm.js pkg/cjs/paseto_wasm.cjs",
     "build:wasm:node:v3": "mkdirp pkg/v3/cjs && wasm-pack build --target nodejs --out-dir pkg/v3/cjs --features v3 --no-default-features && shx mv pkg/v3/cjs/paseto_wasm.js pkg/v3/cjs/paseto_wasm.cjs",
+    "build:wasm:web:v5": "mkdirp pkg/v5 && wasm-pack build --target web --out-dir pkg/v5 --features v5 --no-default-features",
+    "build:wasm:node:v5": "mkdirp pkg/v5/cjs && wasm-pack build --target nodejs --out-dir pkg/v5/cjs --features v5 --no-default-features && shx mv pkg/v5/cjs/paseto_wasm.js pkg/v5/cjs/paseto_wasm.cjs",
+    "build:wasm:memory64": "node build-memory64.mjs --out-dir pkg/memory64",
+    "build:wasm:memory64:node": "node build-memory64.mjs --js-target nodejs --out-dir pkg/memory64-cjs",
+    "build:wasm:memory64:v3": "node build-memory64.mjs --no-default-features --features v3 --out-dir pkg/memory64-v3",
     "test": "pnpm run test:wasm:node && pnpm run test:wasm:web:v3",
     "test:wasm:node": "node tests/node_test.cjs && node test-cross-impl.mjs && node test-node.mjs && node test-vectors.mjs",
     "test:wasm:web": "cross-env NO_HEADLESS=true wasm-pack test --chrome",
     "test:wasm:web:v3": "cross-env NO_HEADLESS=true wasm-pack test --chrome --features v3 --no-default-features",
+    "test:wasm:web:v5": "cross-env NO_HEADLESS=true wasm-pack test --chrome --features v5 --no-default-features",
     "removeDirsBeforePrepublish": "rimraf -g \"./pkg/**/.gitignore\" && rimraf -g \"./pkg/**/package.json\" && rimraf -g \"./pkg/**/README.md\" && rimraf -g \"./pkg/**/paseto_wasm.d.ts\"",
     "prepublishOnly": "pnpm run test:wasm:node && pnpm run build:wasm && pnpm run removeDirsBeforePrepublish"
   },
@@ -45,6 +51,11 @@
       "import": "./pkg/v3/paseto_wasm.js",
       "require": "./pkg/v3/cjs/paseto_wasm.cjs",
       "types": "./pkg/v3/paseto_wasm.d.ts"
+    },
+    "./v5": {
+      "import": "./pkg/v5/paseto_wasm.js",
+      "require": "./pkg/v5/cjs/paseto_wasm.cjs",
+      "types": "./pkg/v5/paseto_wasm.d.ts"
     }
   },
   "license": "MIT",

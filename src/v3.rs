@@ -30,31 +30,67 @@
 //! - `k3.public.*` - 49-byte public key
 //! - `k3.lid.*`, `k3.pid.*`, `k3.sid.*` - Key IDs
 
+use aes::Aes256;
+use aes::cipher::{KeyIvInit, StreamCipher};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use p384::{
-    ecdsa::{
-        signature::{Signer, Verifier},
-        Signature, SigningKey, VerifyingKey,
-    },
-    elliptic_curve::rand_core::OsRng,
+use ctr::Ctr128BE;
+use digest::KeyInit;
+use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
+use p384::ecdsa::{
+    signature::{Signer, Verifier},
+    Signature, SigningKey, VerifyingKey,
 };
-use rusty_paseto_v3::core::{
-    Footer, ImplicitAssertion, Key, Local, Paseto, PasetoNonce, PasetoSymmetricKey, Payload, V3,
-};
-use std::convert::TryInto;
+use sha2::Sha384;
 use wasm_bindgen::prelude::*;
 
+const V3_LOCAL_HEADER: &str = "v3.local.";
 const V3_PUBLIC_HEADER: &str = "v3.public.";
+const V3_AUTH_INFO: &[u8] = b"paseto-auth-key-for-aead";
+const V3_ENC_INFO: &[u8] = b"paseto-encryption-key";
 const SIG_SIZE: usize = 96;
 
-fn pae(pieces: &[&[u8]]) -> Vec<u8> {
-    let mut output = Vec::new();
-    output.extend_from_slice(&(pieces.len() as u64).to_le_bytes());
-    for piece in pieces {
-        output.extend_from_slice(&(piece.len() as u64).to_le_bytes());
-        output.extend_from_slice(piece);
-    }
-    output
+type Aes256Ctr = Ctr128BE<Aes256>;
+type HmacSha384 = Hmac<Sha384>;
+
+fn hkdf_sha384(ikm: &[u8], info: &[u8], len: usize) -> Result<Vec<u8>, JsValue> {
+    let hk = Hkdf::<Sha384>::new(Some(&[]), ikm);
+    let mut okm = vec![0u8; len];
+    hk.expand(info, &mut okm)
+        .map_err(|_| JsValue::from_str("HKDF expand failed"))?;
+    Ok(okm)
+}
+
+fn v3_derive(
+    key: &[u8],
+    nonce: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), JsValue> {
+    let mut ak_info = Vec::with_capacity(56);
+    ak_info.extend_from_slice(V3_AUTH_INFO);
+    ak_info.extend_from_slice(nonce);
+    let mut ek_info = Vec::with_capacity(53);
+    ek_info.extend_from_slice(V3_ENC_INFO);
+    ek_info.extend_from_slice(nonce);
+
+    let ak = hkdf_sha384(key, &ak_info, 48)?;
+    let ek_full = hkdf_sha384(key, &ek_info, 48)?;
+    let ek = ek_full[..32].to_vec();
+    let cn = ek_full[32..].to_vec();
+    Ok((ak, ek, cn))
+}
+
+fn aes_ctr_crypt(enc_key: &[u8], counter_nonce: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut cipher = Aes256Ctr::new_from_slices(enc_key, counter_nonce).expect("CTR init");
+    let mut out = data.to_vec();
+    cipher.apply_keystream(&mut out);
+    out
+}
+
+fn v3_tag(auth_key: &[u8], pae: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let mut mac =
+        HmacSha384::new_from_slice(auth_key).map_err(|_| JsValue::from_str("Invalid auth key"))?;
+    mac.update(pae);
+    Ok(mac.finalize().into_bytes().to_vec())
 }
 
 /// Generates a random 32-byte symmetric key for V3 local encryption.
@@ -95,30 +131,35 @@ pub fn encrypt_v3_local(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(key_hex, 32)?;
-    let key_array: [u8; 32] = key_vec
-        .try_into()
-        .map_err(|_| JsValue::from_str("Key must be 32 bytes"))?;
-    let k = Key::<32>::from(key_array);
-    let key = PasetoSymmetricKey::<V3, Local>::from(k);
-
     let message_str = crate::common::serialize_message(message)?;
 
-    let mut builder = Paseto::<V3, Local>::default();
-    builder.set_payload(Payload::from(message_str.as_str()));
-    if let Some(f) = footer.as_ref() {
-        builder.set_footer(Footer::from(f.as_str()));
-    }
-    if let Some(i) = implicit_assertion.as_ref() {
-        builder.set_implicit_assertion(ImplicitAssertion::from(i.as_str()));
-    }
+    let mut nonce = [0u8; 32];
+    getrandom::fill(&mut nonce).map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
 
-    let nonce_key =
-        Key::<32>::try_new_random().map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
-    let nonce = PasetoNonce::<V3, Local>::from(&nonce_key);
-    let token = builder
-        .try_encrypt(&key, &nonce)
-        .map_err(|e| JsValue::from_str(&format!("Encryption failed: {}", e)))?;
-    Ok(token)
+    let (ak, ek, cn) = v3_derive(&key_vec, &nonce)?;
+    let ciphertext = aes_ctr_crypt(&ek, &cn, message_str.as_bytes());
+
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
+    let pae = crate::common::pae_encode(&[
+        V3_LOCAL_HEADER.as_bytes(),
+        &nonce,
+        &ciphertext,
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    let tag = v3_tag(&ak, &pae)?;
+
+    let mut raw = Vec::with_capacity(80 + ciphertext.len());
+    raw.extend_from_slice(&nonce);
+    raw.extend_from_slice(&ciphertext);
+    raw.extend_from_slice(&tag);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(&raw);
+    Ok(crate::common::format_token(
+        V3_LOCAL_HEADER,
+        &payload_b64,
+        &footer,
+    ))
 }
 
 /// Decrypts a V3 Local token.
@@ -142,18 +183,33 @@ pub fn decrypt_v3_local(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(key_hex, 32)?;
-    let key_array: [u8; 32] = key_vec
-        .try_into()
-        .map_err(|_| JsValue::from_str("Key must be 32 bytes"))?;
-    let k = Key::<32>::from(key_array);
-    let key = PasetoSymmetricKey::<V3, Local>::from(k);
+    let raw = crate::common::parse_token(token, V3_LOCAL_HEADER, &footer)?;
+    if raw.len() < 80 {
+        return Err(JsValue::from_str("Token too short"));
+    }
+    let nonce = &raw[..32];
+    let tag_start = raw.len() - 48;
+    let ciphertext = &raw[32..tag_start];
+    let tag = &raw[tag_start..];
 
-    let f_val = footer.as_deref().map(Footer::from);
-    let i_val = implicit_assertion.as_deref().map(ImplicitAssertion::from);
+    let (ak, ek, cn) = v3_derive(&key_vec, nonce)?;
 
-    let message = Paseto::<V3, Local>::try_decrypt(token, &key, f_val, i_val)
-        .map_err(|e| JsValue::from_str(&format!("Decryption failed: {}", e)))?;
-    Ok(message)
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
+    let pae = crate::common::pae_encode(&[
+        V3_LOCAL_HEADER.as_bytes(),
+        nonce,
+        ciphertext,
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    let expected_tag = v3_tag(&ak, &pae)?;
+    if !crate::common::constant_time_eq(tag, &expected_tag) {
+        return Err(JsValue::from_str("Decryption failed: invalid tag"));
+    }
+
+    let plaintext = aes_ctr_crypt(&ek, &cn, ciphertext);
+    String::from_utf8(plaintext).map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
 }
 
 /// V3 asymmetric key pair.
@@ -189,10 +245,13 @@ impl V3KeyPair {
 /// @returns {V3KeyPair} { secret: 96-hex, public: 98-hex }
 #[wasm_bindgen]
 pub fn generate_v3_public_key_pair() -> V3KeyPair {
-    let signing_key = SigningKey::random(&mut OsRng);
+    let mut secret = [0u8; 48];
+    getrandom::fill(&mut secret).expect("RNG failure");
+    let signing_key =
+        SigningKey::from_slice(&secret).expect("RNG produced invalid key");
     let secret_bytes = signing_key.to_bytes();
     let verifying_key = VerifyingKey::from(&signing_key);
-    let public_bytes = verifying_key.to_encoded_point(true);
+    let public_bytes = verifying_key.to_sec1_point(true);
 
     V3KeyPair {
         secret: hex::encode(secret_bytes),
@@ -226,33 +285,34 @@ pub fn sign_v3_public(
     let signing_key =
         SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
-    let pk_bytes = verifying_key.to_encoded_point(true);
+    let pk_bytes = verifying_key.to_sec1_point(true);
     let pk_slice = pk_bytes.as_bytes();
 
     let message_str = crate::common::serialize_message(message)?;
 
-    let footer_str = footer.unwrap_or_default();
-    let implicit = implicit_assertion.unwrap_or_default();
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit = implicit_assertion.clone().unwrap_or_default();
 
-    let pre_auth = pae(&[
+    let m2 = crate::common::pae_encode(&[
         pk_slice,
         V3_PUBLIC_HEADER.as_bytes(),
         message_str.as_bytes(),
         footer_str.as_bytes(),
         implicit.as_bytes(),
     ]);
-
-    let signature: Signature = signing_key.sign(&pre_auth);
+    let signature: Signature = signing_key
+        .sign(&m2);
     let sig_bytes = signature.to_bytes();
 
-    let mut payload = Vec::new();
+    let mut payload = Vec::with_capacity(message_str.len() + SIG_SIZE);
     payload.extend_from_slice(message_str.as_bytes());
     payload.extend_from_slice(&sig_bytes);
 
-    Ok(format!(
-        "{}{}",
+    let payload_b64 = URL_SAFE_NO_PAD.encode(&payload);
+    Ok(crate::common::format_token(
         V3_PUBLIC_HEADER,
-        URL_SAFE_NO_PAD.encode(&payload)
+        &payload_b64,
+        &footer,
     ))
 }
 
@@ -276,56 +336,34 @@ pub fn verify_v3_public(
     footer: Option<String>,
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
-    if !token.starts_with(V3_PUBLIC_HEADER) {
-        return Err(JsValue::from_str("Invalid token header"));
-    }
     let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
 
     let verifying_key = VerifyingKey::from_sec1_bytes(&key_vec)
         .map_err(|_| JsValue::from_str("Invalid public key"))?;
 
-    let footer_str = footer.unwrap_or_default();
-    let implicit = implicit_assertion.unwrap_or_default();
-
-    // Token format: v3.public.{m||sig}.{footer}
-    // Split at the last dot to separate footer
-    let after_header = &token[V3_PUBLIC_HEADER.len()..];
-
-    // Find the last dot - everything after is the footer
-    let (encoded_payload, _token_footer) = match after_header.rfind('.') {
-        Some(pos) => {
-            let payload_part = &after_header[..pos];
-            let token_footer = &after_header[pos + 1..];
-            (payload_part, Some(token_footer))
-        }
-        None => (after_header, None),
-    };
-
-    let payload = URL_SAFE_NO_PAD
-        .decode(encoded_payload)
-        .map_err(|e| JsValue::from_str(&format!("Base64 Error: {}", e)))?;
-
-    if payload.len() < SIG_SIZE {
+    let raw = crate::common::parse_token(token, V3_PUBLIC_HEADER, &footer)?;
+    if raw.len() < SIG_SIZE {
         return Err(JsValue::from_str("Token too short"));
     }
+    let message_len = raw.len() - SIG_SIZE;
+    let message_bytes = &raw[..message_len];
+    let sig_bytes = &raw[message_len..];
 
-    let message_len = payload.len() - SIG_SIZE;
-    let message_bytes = &payload[..message_len];
-    let sig_bytes = &payload[message_len..];
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit = implicit_assertion.clone().unwrap_or_default();
 
-    let pre_auth = pae(&[
+    let m2 = crate::common::pae_encode(&[
         &key_vec,
         V3_PUBLIC_HEADER.as_bytes(),
         message_bytes,
         footer_str.as_bytes(),
         implicit.as_bytes(),
     ]);
-
     let signature = Signature::from_slice(sig_bytes)
         .map_err(|_| JsValue::from_str("Invalid signature format"))?;
 
     verifying_key
-        .verify(&pre_auth, &signature)
+        .verify(&m2, &signature)
         .map_err(|_| JsValue::from_str("Signature verification failed"))?;
 
     String::from_utf8(message_bytes.to_vec())
@@ -479,7 +517,7 @@ pub fn get_v3_secret_key_id(secret_key_hex: &str) -> Result<String, JsValue> {
     let signing_key =
         SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
     let verifying_key = VerifyingKey::from(&signing_key);
-    let pk_bytes = verifying_key.to_encoded_point(true);
+    let pk_bytes = verifying_key.to_sec1_point(true);
     let pk_slice = pk_bytes.as_bytes();
 
     Ok(crate::common::paserk_id_from_bytes(

@@ -292,6 +292,40 @@ const keyPair = v3.generate_v3_public_key_pair();
 
 ---
 
+### PASETO v5 API (Draft, local only)
+
+Access via `import * as v5 from 'paseto-wasm/v5'`
+
+Requires the `v5` cargo feature. Implements the draft v5 Encrypt/Decrypt
+operations (same AES-256-CTR + HMAC-SHA384 construction as v3.local, with
+`v5.local.` headers and `k5.*` PASERK prefixes).
+
+Key sizes:
+
+| Key Type | v5 Size |
+|---------|---------|
+| Local Key | 32 bytes (64 hex) |
+
+#### v5 Key Generation
+
+```javascript
+import * as v5 from 'paseto-wasm/v5';
+
+const localKey = v5.generate_v5_local_key();
+```
+
+#### v5 Local Encryption
+
+- `encrypt_v5_local(key_hex, message, footer?, implicit_assertion?)`
+- `decrypt_v5_local(key_hex, token, footer?, implicit_assertion?)`
+
+#### v5 PASERK Functions
+
+- `key_to_paserk_v5_local`, `paserk_v5_local_to_key`
+- `get_v5_local_key_id`
+
+---
+
 ## Error Handling
 
 All functions throw JavaScript errors with descriptive messages:
@@ -349,6 +383,36 @@ pnpm run test:wasm:web:v3
 ```
 
 For detailed contribution guidelines, please see [CONTRIBUTING.md](contributing.md).
+
+### Memory64 build (wasm64, >4GB linear memory)
+
+The crate code is memory64-clean (no 32-bit pointer assumptions) and can be
+built for the `wasm64-unknown-unknown` target (Memory64 proposal):
+
+```sh
+pnpm run build:wasm:memory64       # web glue -> pkg/memory64
+pnpm run build:wasm:memory64:node  # node glue -> pkg/memory64-cjs
+pnpm run build:wasm:memory64:v3    # v3 feature -> pkg/memory64-v3
+```
+
+Requirements (handled automatically by `build-memory64.mjs` when missing):
+
+- Nightly Rust (`rustup toolchain install nightly`) — the wasm64 target has
+  no prebuilt std, so it is rebuilt via `-Z build-std=std,panic_abort`
+  (needs the `rust-src` component).
+- `wasm-bindgen-cli` matching the locked `wasm-bindgen` version (it already
+  supports the wasm64 target; the script installs the right version
+  automatically).
+
+Notes:
+
+- `wasm-pack` cannot target custom triples, so the memory64 pipeline uses
+  `cargo` + `wasm-bindgen` directly instead of `wasm-pack`.
+- The default `wasm32` build is unchanged and stays the recommended build.
+  Only use memory64 if you need more than 4 GiB of linear memory.
+- The runtime must support memory64. Recent Node.js (tested on v24, no flag
+  needed) and current browsers work; older runtimes may need an opt-in such
+  as `node --experimental-wasm-memory64`.
 
 ## 🛠️ Built With
 

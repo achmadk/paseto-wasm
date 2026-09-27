@@ -1,3 +1,5 @@
+#[cfg(feature = "v5")]
+use paseto_wasm::v5;
 #[cfg(feature = "v3")]
 use paseto_wasm::v3;
 #[cfg(feature = "v4")]
@@ -173,5 +175,76 @@ fn test_v3_public_wrong_key_fails() {
 
     // Verification with wrong key should fail
     let result = v3::verify_v3_public(&key_pair2.public(), &token, None, None);
+    assert!(result.is_err());
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local() {
+    let key = v5::generate_v5_local_key();
+    let message = JsValue::from_str("hello v5");
+
+    let token = v5::encrypt_v5_local(&key, message.clone(), None, None).expect("encrypt failed");
+    assert!(token.starts_with("v5.local."));
+    let decrypted = v5::decrypt_v5_local(&key, &token, None, None).expect("decrypt failed");
+
+    assert_eq!(decrypted, "hello v5");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local_with_footer() {
+    let key = v5::generate_v5_local_key();
+    let message = JsValue::from_str("hello v5 with footer");
+    let footer = Some("footer data".to_string());
+
+    let token =
+        v5::encrypt_v5_local(&key, message.clone(), footer.clone(), None).expect("encrypt failed");
+    let decrypted = v5::decrypt_v5_local(&key, &token, footer, None).expect("decrypt failed");
+
+    assert_eq!(decrypted, "hello v5 with footer");
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_paserk() {
+    let key = v5::generate_v5_local_key();
+    let paserk_local = v5::key_to_paserk_v5_local(&key).expect("paserk local");
+    assert!(paserk_local.starts_with("k5.local."));
+    let key_back = v5::paserk_v5_local_to_key(&paserk_local).expect("key back");
+    assert_eq!(key, key_back);
+
+    let kid = v5::get_v5_local_key_id(&key).expect("kid");
+    assert!(kid.starts_with("k5.lid."));
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local_wrong_key_fails() {
+    let key1 = v5::generate_v5_local_key();
+    let key2 = v5::generate_v5_local_key();
+    let message = JsValue::from_str("test message");
+
+    let token = v5::encrypt_v5_local(&key1, message, None, None).expect("encrypt failed");
+
+    // Decryption with wrong key should fail
+    let result = v5::decrypt_v5_local(&key2, &token, None, None);
+    assert!(result.is_err());
+}
+
+#[cfg(feature = "v5")]
+#[wasm_bindgen_test]
+fn test_v5_local_tampered_token_fails() {
+    let key = v5::generate_v5_local_key();
+    let message = JsValue::from_str("test message");
+
+    let token = v5::encrypt_v5_local(&key, message, None, None).expect("encrypt failed");
+
+    // Flip a character inside the payload part
+    let mut tampered = token.clone();
+    let pos = "v5.local.".len() + 5;
+    tampered.replace_range(pos..pos + 1, "A");
+
+    let result = v5::decrypt_v5_local(&key, &tampered, None, None);
     assert!(result.is_err());
 }

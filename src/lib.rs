@@ -15,6 +15,10 @@
 //!   - Optional feature: `v3`
 //!   - Module: [`crate::v3`]
 //!
+//! - **PASETO v5**: Draft PASETO version using AES-256-CTR + HMAC-SHA384 (local only)
+//!   - Optional feature: `v5`
+//!   - Module: [`crate::v5`]
+//!
 //! ## Usage
 //!
 //! See the individual module documentation for detailed API usage.
@@ -102,5 +106,8 @@ pub mod v4;
 
 #[cfg(feature = "v3")]
 pub mod v3;
+
+#[cfg(feature = "v5")]
+pub mod v5;
 
 pub mod common;

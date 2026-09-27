@@ -22,13 +22,64 @@
 //! - `k4.public.*` - 32-byte public key
 //! - `k4.lid.*`, `k4.pid.*`, `k4.sid.*` - Key IDs
 
-use ed25519_dalek::{SigningKey, VerifyingKey};
-use rusty_paseto::core::{
-    Footer, ImplicitAssertion, Key, Local, Paseto, PasetoAsymmetricPrivateKey,
-    PasetoAsymmetricPublicKey, PasetoNonce, PasetoSymmetricKey, Payload, Public, V4,
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use blake2::{
+    digest::{
+        consts::{U32, U56},
+        FixedOutput, KeyInit, Update,
+    },
+    Blake2bMac,
 };
-use std::convert::TryInto;
+use chacha20::{
+    cipher::{KeyIvInit, StreamCipher},
+    XChaCha20,
+};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use wasm_bindgen::prelude::*;
+
+const V4_LOCAL_HEADER: &str = "v4.local.";
+const V4_PUBLIC_HEADER: &str = "v4.public.";
+const V4_AUTH_INFO: &[u8] = b"paseto-auth-key-for-aead";
+const V4_ENC_INFO: &[u8] = b"paseto-encryption-key";
+
+fn v4_auth_key(key: &[u8; 32], nonce: &[u8; 32]) -> Result<[u8; 32], JsValue> {
+    let mut info = Vec::with_capacity(56);
+    info.extend_from_slice(V4_AUTH_INFO);
+    info.extend_from_slice(nonce);
+    let mut mac = Blake2bMac::<U32>::new_from_slice(key)
+        .map_err(|_| JsValue::from_str("Invalid key"))?;
+    mac.update(&info);
+    let out = mac.finalize_fixed();
+    let mut ak = [0u8; 32];
+    ak.copy_from_slice(&out);
+    Ok(ak)
+}
+
+fn v4_enc_parts(key: &[u8; 32], nonce: &[u8; 32]) -> Result<([u8; 32], [u8; 24]), JsValue> {
+    let mut info = Vec::with_capacity(53);
+    info.extend_from_slice(V4_ENC_INFO);
+    info.extend_from_slice(nonce);
+    let mut mac = Blake2bMac::<U56>::new_from_slice(key)
+        .map_err(|_| JsValue::from_str("Invalid key"))?;
+    mac.update(&info);
+    let out = mac.finalize_fixed();
+    let bytes = out.to_vec();
+    let mut ek = [0u8; 32];
+    let mut xn = [0u8; 24];
+    ek.copy_from_slice(&bytes[..32]);
+    xn.copy_from_slice(&bytes[32..56]);
+    Ok((ek, xn))
+}
+
+fn v4_tag(auth_key: &[u8; 32], pae: &[u8]) -> Result<[u8; 32], JsValue> {
+    let mut mac = Blake2bMac::<U32>::new_from_slice(auth_key)
+        .map_err(|_| JsValue::from_str("Invalid auth key"))?;
+    mac.update(pae);
+    let out = mac.finalize_fixed();
+    let mut tag = [0u8; 32];
+    tag.copy_from_slice(&out);
+    Ok(tag)
+}
 
 /// Generates a random 32-byte symmetric key for V4 local encryption.
 ///
@@ -68,30 +119,43 @@ pub fn encrypt_v4_local(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(key_hex, 32)?;
-    let key_array: [u8; 32] = key_vec
-        .try_into()
-        .map_err(|_| JsValue::from_str("Key must be 32 bytes"))?;
-    let k = Key::<32>::from(key_array);
-    let key = PasetoSymmetricKey::<V4, Local>::from(k);
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&key_vec);
 
     let message_str = crate::common::serialize_message(message)?;
 
-    let mut builder = Paseto::<V4, Local>::default();
-    builder.set_payload(Payload::from(message_str.as_str()));
-    if let Some(f) = footer.as_ref() {
-        builder.set_footer(Footer::from(f.as_str()));
-    }
-    if let Some(i) = implicit_assertion.as_ref() {
-        builder.set_implicit_assertion(ImplicitAssertion::from(i.as_str()));
-    }
+    let mut nonce = [0u8; 32];
+    getrandom::fill(&mut nonce).map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
 
-    let nonce_key =
-        Key::<32>::try_new_random().map_err(|e| JsValue::from_str(&format!("RNG error: {}", e)))?;
-    let nonce = PasetoNonce::<V4, Local>::from(&nonce_key);
-    let token = builder
-        .try_encrypt(&key, &nonce)
-        .map_err(|e| JsValue::from_str(&format!("Encryption failed: {}", e)))?;
-    Ok(token)
+    let ak = v4_auth_key(&key, &nonce)?;
+    let (ek, xn) = v4_enc_parts(&key, &nonce)?;
+
+    let mut ciphertext = message_str.as_bytes().to_vec();
+    let mut cipher = XChaCha20::new_from_slices(&ek, &xn)
+        .map_err(|_| JsValue::from_str("Cipher init failed"))?;
+    cipher.apply_keystream(&mut ciphertext);
+
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
+    let pae = crate::common::pae_encode(&[
+        V4_LOCAL_HEADER.as_bytes(),
+        &nonce,
+        &ciphertext,
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    let tag = v4_tag(&ak, &pae)?;
+
+    let mut raw = Vec::with_capacity(64 + ciphertext.len());
+    raw.extend_from_slice(&nonce);
+    raw.extend_from_slice(&ciphertext);
+    raw.extend_from_slice(&tag);
+    let payload_b64 = URL_SAFE_NO_PAD.encode(&raw);
+    Ok(crate::common::format_token(
+        V4_LOCAL_HEADER,
+        &payload_b64,
+        &footer,
+    ))
 }
 
 /// Decrypts a V4 Local token.
@@ -115,18 +179,42 @@ pub fn decrypt_v4_local(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(key_hex, 32)?;
-    let key_array: [u8; 32] = key_vec
-        .try_into()
-        .map_err(|_| JsValue::from_str("Key must be 32 bytes"))?;
-    let k = Key::<32>::from(key_array);
-    let key = PasetoSymmetricKey::<V4, Local>::from(k);
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&key_vec);
 
-    let f_val = footer.as_deref().map(Footer::from);
-    let i_val = implicit_assertion.as_deref().map(ImplicitAssertion::from);
+    let raw = crate::common::parse_token(token, V4_LOCAL_HEADER, &footer)?;
+    if raw.len() < 64 {
+        return Err(JsValue::from_str("Token too short"));
+    }
+    let mut nonce = [0u8; 32];
+    nonce.copy_from_slice(&raw[..32]);
+    let tag_start = raw.len() - 32;
+    let mut tag = [0u8; 32];
+    tag.copy_from_slice(&raw[tag_start..]);
+    let ciphertext = &raw[32..tag_start];
 
-    let message = Paseto::<V4, Local>::try_decrypt(token, &key, f_val, i_val)
-        .map_err(|e| JsValue::from_str(&format!("Decryption failed: {}", e)))?;
-    Ok(message)
+    let ak = v4_auth_key(&key, &nonce)?;
+    let (ek, xn) = v4_enc_parts(&key, &nonce)?;
+
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
+    let pae = crate::common::pae_encode(&[
+        V4_LOCAL_HEADER.as_bytes(),
+        &nonce,
+        ciphertext,
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    let expected_tag = v4_tag(&ak, &pae)?;
+    if !crate::common::constant_time_eq(&tag, &expected_tag) {
+        return Err(JsValue::from_str("Decryption failed: invalid tag"));
+    }
+
+    let mut plaintext = ciphertext.to_vec();
+    let mut cipher = XChaCha20::new_from_slices(&ek, &xn)
+        .map_err(|_| JsValue::from_str("Cipher init failed"))?;
+    cipher.apply_keystream(&mut plaintext);
+    String::from_utf8(plaintext).map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
 }
 
 /// V4 asymmetric key pair.
@@ -199,23 +287,31 @@ pub fn sign_v4_public(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(secret_key_hex, 64)?;
-    let key = PasetoAsymmetricPrivateKey::<V4, Public>::from(key_vec.as_slice());
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&key_vec[..32]);
+    let signing_key = SigningKey::from_bytes(&seed);
 
     let message_str = crate::common::serialize_message(message)?;
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
 
-    let mut builder = Paseto::<V4, Public>::default();
-    builder.set_payload(Payload::from(message_str.as_str()));
-    if let Some(f) = footer.as_ref() {
-        builder.set_footer(Footer::from(f.as_str()));
-    }
-    if let Some(i) = implicit_assertion.as_ref() {
-        builder.set_implicit_assertion(ImplicitAssertion::from(i.as_str()));
-    }
+    let pae = crate::common::pae_encode(&[
+        V4_PUBLIC_HEADER.as_bytes(),
+        message_str.as_bytes(),
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    let signature = signing_key.sign(&pae);
 
-    let token = builder
-        .try_sign(&key)
-        .map_err(|e| JsValue::from_str(&format!("Signing failed: {}", e)))?;
-    Ok(token)
+    let mut raw = Vec::with_capacity(message_str.len() + 64);
+    raw.extend_from_slice(message_str.as_bytes());
+    raw.extend_from_slice(&signature.to_bytes());
+    let payload_b64 = URL_SAFE_NO_PAD.encode(&raw);
+    Ok(crate::common::format_token(
+        V4_PUBLIC_HEADER,
+        &payload_b64,
+        &footer,
+    ))
 }
 
 /// Verifies a V4 Public token (Ed25519).
@@ -239,18 +335,34 @@ pub fn verify_v4_public(
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
     let key_vec = crate::common::decode_hex_key(public_key_hex, 32)?;
-    let key_array: [u8; 32] = key_vec
-        .try_into()
-        .map_err(|_| JsValue::from_str("Key must be 32 bytes"))?;
-    let k = Key::<32>::from(key_array);
-    let key = PasetoAsymmetricPublicKey::<V4, Public>::from(&k);
+    let mut pk = [0u8; 32];
+    pk.copy_from_slice(&key_vec);
+    let verifying_key =
+        VerifyingKey::from_bytes(&pk).map_err(|_| JsValue::from_str("Invalid public key"))?;
 
-    let f_val = footer.as_deref().map(Footer::from);
-    let i_val = implicit_assertion.as_deref().map(ImplicitAssertion::from);
+    let raw = crate::common::parse_token(token, V4_PUBLIC_HEADER, &footer)?;
+    if raw.len() < 64 {
+        return Err(JsValue::from_str("Token too short"));
+    }
+    let msg_len = raw.len() - 64;
+    let msg_bytes = &raw[..msg_len];
+    let sig_bytes = &raw[msg_len..];
+    let mut sig_arr = [0u8; 64];
+    sig_arr.copy_from_slice(sig_bytes);
+    let signature = Signature::from_bytes(&sig_arr);
 
-    let message = Paseto::<V4, Public>::try_verify(token, &key, f_val, i_val)
-        .map_err(|e| JsValue::from_str(&format!("Verification failed: {}", e)))?;
-    Ok(message)
+    let footer_str = footer.clone().unwrap_or_default();
+    let implicit_str = implicit_assertion.clone().unwrap_or_default();
+    let pae = crate::common::pae_encode(&[
+        V4_PUBLIC_HEADER.as_bytes(),
+        msg_bytes,
+        footer_str.as_bytes(),
+        implicit_str.as_bytes(),
+    ]);
+    verifying_key
+        .verify_strict(&pae, &signature)
+        .map_err(|_| JsValue::from_str("Verification failed: invalid signature"))?;
+    String::from_utf8(msg_bytes.to_vec()).map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
 }
 
 /// Converts a V4 local key to PASERK format.
