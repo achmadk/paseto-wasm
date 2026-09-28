@@ -1,5 +1,6 @@
 import * as paseto from './pkg/cjs/paseto_wasm.cjs';
 import * as pasetoV3 from './pkg/v3/cjs/paseto_wasm.cjs';
+import * as pasetoV6 from './pkg/v6/cjs/paseto_wasm.cjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -73,8 +74,52 @@ function testV3PublicVerify(test) {
       results.passed++;
     } else {
       console.log(`  ❌ ${test.name}: FAILED - Message mismatch`);
+      results.failed++;
+    }
+  } catch (e) {
+    console.log(`  ❌ ${test.name}: ERROR - ${e}`);
+    results.failed++;
+    results.errors.push({ test: test.name, error: String(e) });
+  }
+}
+
+function testV6LocalDecrypt(test) {
+  try {
+    const decrypted = pasetoV6.decrypt_v6_local(
+      test.key,
+      test.token,
+      test.footer || null,
+      test.implicit || null
+    );
+    if (decrypted === test.message) {
+      console.log(`  ✅ ${test.name}: PASS`);
+      results.passed++;
+    } else {
+      console.log(`  ❌ ${test.name}: FAILED - Message mismatch`);
       console.log(`     Expected: ${test.message}`);
-      console.log(`     Got: ${verified}`);
+      console.log(`     Got: ${decrypted}`);
+      results.failed++;
+    }
+  } catch (e) {
+    console.log(`  ❌ ${test.name}: ERROR - ${e}`);
+    results.failed++;
+    results.errors.push({ test: test.name, error: String(e) });
+  }
+}
+
+function testV6PublicVerify(test) {
+  try {
+    const verified = pasetoV6.verify_v6_public(
+      test.public_key,
+      test.token,
+      test.footer || null,
+      test.implicit || null
+    );
+    if (verified === test.message) {
+      console.log(`  ✅ ${test.name}: PASS`);
+      results.passed++;
+    } else {
+      console.log(`  ❌ ${test.name}: FAILED - Message mismatch`);
       results.failed++;
     }
   } catch (e) {
@@ -123,6 +168,19 @@ async function main() {
   for (const test of testData.v3_public) {
     testV3PublicVerify(test);
   }
+
+  console.log('\nTesting V6 Local (JS oracle → Rust):');
+  console.log('─────────────────────────────────');
+  const testDataV6 = JSON.parse(readFileSync('./test-data-v6.json', 'utf8'));
+  for (const test of testDataV6.v6_local) {
+    testV6LocalDecrypt(test);
+  }
+
+  console.log('\nTesting V6 Public (JS oracle → Rust):');
+  console.log('─────────────────────────────────');
+  for (const test of testDataV6.v6_public) {
+    testV6PublicVerify(test);
+  }
   
   console.log('\n=== Summary ===');
   console.log(`Passed: ${results.passed}`);
@@ -167,6 +225,20 @@ async function runSelfTests() {
       const message = '{"data":"test"}';
       const token = pasetoV3.sign_v3_public(kp.secret, message, null, null);
       const verified = pasetoV3.verify_v3_public(kp.public, token, null, null);
+      return verified === message;
+    }},
+    { name: 'V6 Local', run: () => {
+      const key = pasetoV6.generate_v6_local_key();
+      const message = '{"data":"test"}';
+      const token = pasetoV6.encrypt_v6_local(key, message, null, null);
+      const decrypted = pasetoV6.decrypt_v6_local(key, token, null, null);
+      return decrypted === message;
+    }},
+    { name: 'V6 Public', run: () => {
+      const kp = pasetoV6.generate_v6_public_key_pair();
+      const message = '{"data":"test"}';
+      const token = pasetoV6.sign_v6_public(kp.secret, message, null, null);
+      const verified = pasetoV6.verify_v6_public(kp.public, token, null, null);
       return verified === message;
     }},
   ];

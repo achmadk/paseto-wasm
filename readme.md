@@ -326,6 +326,69 @@ const localKey = v5.generate_v5_local_key();
 
 ---
 
+### PASETO v6 API (Draft, post-quantum public)
+
+Access via `import * as v6 from 'paseto-wasm/v6'`
+
+Requires the `v6` cargo feature. Implements the draft v6 Encrypt/Decrypt
+operations (same keyed-BLAKE2b + XChaCha20 construction as v4.local, with
+`v6.local.` headers and `k6.*` PASERK prefixes) and the Sign/Verify
+operations using SLH-DSA-SHA256-128s (post-quantum, FIPS 205) with
+`v6.public.` headers.
+
+Key sizes:
+
+| Key Type | v6 Size |
+|---------|---------|
+| Local Key | 32 bytes (64 hex) |
+| Secret Key | 64 bytes (128 hex) |
+| Public Key | 32 bytes (64 hex) |
+| Signature | 7856 bytes |
+
+#### v6 Key Generation
+
+```javascript
+import * as v6 from 'paseto-wasm/v6';
+
+const localKey = v6.generate_v6_local_key();
+const keyPair = v6.generate_v6_public_key_pair();
+```
+
+#### v6 Local Encryption
+
+- `encrypt_v6_local(key_hex, message, footer?, implicit_assertion?)`
+- `decrypt_v6_local(key_hex, token, footer?, implicit_assertion?)`
+
+#### v6 Public Signing
+
+- `sign_v6_public(secret_key_hex, message, footer?, implicit_assertion?)`
+- `verify_v6_public(public_key_hex, token, footer?, implicit_assertion?)`
+
+```javascript
+const token = v6.sign_v6_public(keyPair.secret, { user: '123' });
+const verified = v6.verify_v6_public(keyPair.public, token);
+```
+
+#### v6 PASERK Functions
+
+- `key_to_paserk_v6_local`, `paserk_v6_local_to_key`
+- `key_to_paserk_v6_secret`, `paserk_v6_secret_to_key`
+- `key_to_paserk_v6_public`, `paserk_v6_public_to_key`
+- `get_v6_local_key_id`, `get_v6_public_key_id`, `get_v6_secret_key_id`
+
+#### v6 Size and Performance Notes
+
+- `v6.public` signatures are 7856 bytes, so even tiny messages produce
+  tokens of roughly 10.5KB. Do not store them in cookies or other
+  size-limited places.
+- Signing takes on the order of 0.75s on native release builds (measured
+  747ms; WASM and debug builds are slower), while verification is
+  sub-millisecond. Keep signing off hot paths.
+- The `v6` feature adds roughly 14KB to the WASM bundle versus a
+  `v5`-only build. It is opt-in, so the default bundle is unchanged.
+
+---
+
 ## Error Handling
 
 All functions throw JavaScript errors with descriptive messages:
@@ -393,6 +456,9 @@ built for the `wasm64-unknown-unknown` target (Memory64 proposal):
 pnpm run build:wasm:memory64       # web glue -> pkg/memory64
 pnpm run build:wasm:memory64:node  # node glue -> pkg/memory64-cjs
 pnpm run build:wasm:memory64:v3    # v3 feature -> pkg/memory64-v3
+pnpm run build:wasm:memory64:v4    # v4 feature -> pkg/memory64-v4
+pnpm run build:wasm:memory64:v5    # v5 feature -> pkg/memory64-v5
+pnpm run build:wasm:memory64:v6    # v6 feature -> pkg/memory64-v6
 ```
 
 Requirements (handled automatically by `build-memory64.mjs` when missing):

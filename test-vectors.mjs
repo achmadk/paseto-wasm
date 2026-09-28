@@ -1,5 +1,6 @@
 import * as pasetoV4 from './pkg/cjs/paseto_wasm.cjs';
 import * as pasetoV3 from './pkg/v3/cjs/paseto_wasm.cjs';
+import * as pasetoV6 from './pkg/v6/cjs/paseto_wasm.cjs';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -90,6 +91,42 @@ function testV3PublicSignShouldFail(vector) {
     return { pass: false, error: 'Expected failure but succeeded' };
   } catch (e) {
     return { pass: true };
+  }
+}
+
+// V6 vectors come from test-data-v6.json (independent JS oracle; no
+// official v6 vectors exist yet) using {message, footer, implicit} fields.
+function testV6LocalEncrypt(vector) {
+  try {
+    const decrypted = pasetoV6.decrypt_v6_local(
+      vector.key,
+      vector.token,
+      vector.footer || null,
+      vector.implicit || null
+    );
+    if (decrypted === vector.message) {
+      return { pass: true };
+    }
+    return { pass: false, expected: vector.message, got: decrypted };
+  } catch (e) {
+    return { pass: false, error: String(e) };
+  }
+}
+
+function testV6PublicSign(vector) {
+  try {
+    const verified = pasetoV6.verify_v6_public(
+      vector.public_key,
+      vector.token,
+      vector.footer || null,
+      vector.implicit || null
+    );
+    if (verified === vector.message) {
+      return { pass: true };
+    }
+    return { pass: false, expected: vector.message, got: verified };
+  } catch (e) {
+    return { pass: false, error: String(e) };
   }
 }
 
@@ -188,6 +225,37 @@ async function main() {
       results.passed++;
     } else {
       console.log(`  ❌ ${vector.name}: Should have failed but succeeded`);
+      results.failed++;
+    }
+  }
+
+  console.log('\nTesting V6 Local (JS oracle vectors):');
+  console.log('─────────────────────────────────');
+  const v6Vectors = JSON.parse(readFileSync('./test-data-v6.json', 'utf8'));
+  for (const vector of v6Vectors.v6_local) {
+    const result = testV6LocalEncrypt(vector);
+    if (result.pass) {
+      console.log(`  ✅ ${vector.name}: PASS`);
+      results.passed++;
+    } else {
+      console.log(`  ❌ ${vector.name}: FAILED`);
+      if (result.error) console.log(`     Error: ${result.error}`);
+      else console.log(`     Expected: ${result.expected}\n     Got: ${result.got}`);
+      results.failed++;
+    }
+  }
+
+  console.log('\nTesting V6 Public (JS oracle vectors):');
+  console.log('─────────────────────────────────');
+  for (const vector of v6Vectors.v6_public) {
+    const result = testV6PublicSign(vector);
+    if (result.pass) {
+      console.log(`  ✅ ${vector.name}: PASS`);
+      results.passed++;
+    } else {
+      console.log(`  ❌ ${vector.name}: FAILED`);
+      if (result.error) console.log(`     Error: ${result.error}`);
+      else console.log(`     Expected: ${result.expected}\n     Got: ${result.got}`);
       results.failed++;
     }
   }

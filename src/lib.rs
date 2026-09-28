@@ -19,6 +19,11 @@
 //!   - Optional feature: `v5`
 //!   - Module: [`crate::v5`]
 //!
+//! - **PASETO v6**: Draft PASETO version using XChaCha20 + BLAKE2b (local) and
+//!   SLH-DSA-SHA256-128s (public, post-quantum)
+//!   - Optional feature: `v6`
+//!   - Module: [`crate::v6`]
+//!
 //! ## Usage
 //!
 //! See the individual module documentation for detailed API usage.
@@ -109,5 +114,8 @@ pub mod v3;
 
 #[cfg(feature = "v5")]
 pub mod v5;
+
+#[cfg(feature = "v6")]
+pub mod v6;
 
 pub mod common;

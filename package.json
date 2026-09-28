@@ -16,9 +16,14 @@
     "build:wasm:node:v3": "mkdirp pkg/v3/cjs && wasm-pack build --target nodejs --out-dir pkg/v3/cjs --features v3 --no-default-features && shx mv pkg/v3/cjs/paseto_wasm.js pkg/v3/cjs/paseto_wasm.cjs",
     "build:wasm:web:v5": "mkdirp pkg/v5 && wasm-pack build --target web --out-dir pkg/v5 --features v5 --no-default-features",
     "build:wasm:node:v5": "mkdirp pkg/v5/cjs && wasm-pack build --target nodejs --out-dir pkg/v5/cjs --features v5 --no-default-features && shx mv pkg/v5/cjs/paseto_wasm.js pkg/v5/cjs/paseto_wasm.cjs",
+    "build:wasm:web:v6": "mkdirp pkg/v6 && wasm-pack build --target web --out-dir pkg/v6 --features v6 --no-default-features",
+    "build:wasm:node:v6": "mkdirp pkg/v6/cjs && wasm-pack build --target nodejs --out-dir pkg/v6/cjs --features v6 --no-default-features && shx mv pkg/v6/cjs/paseto_wasm.js pkg/v6/cjs/paseto_wasm.cjs",
     "build:wasm:memory64": "node build-memory64.mjs --out-dir pkg/memory64",
     "build:wasm:memory64:node": "node build-memory64.mjs --js-target nodejs --out-dir pkg/memory64-cjs",
     "build:wasm:memory64:v3": "node build-memory64.mjs --no-default-features --features v3 --out-dir pkg/memory64-v3",
+    "build:wasm:memory64:v4": "node build-memory64.mjs --features v4 --out-dir pkg/memory64-v4",
+    "build:wasm:memory64:v5": "node build-memory64.mjs --no-default-features --features v5 --out-dir pkg/memory64-v5",
+    "build:wasm:memory64:v6": "node build-memory64.mjs --no-default-features --features v6 --out-dir pkg/memory64-v6",
     "test": "pnpm run test:wasm:node && pnpm run test:wasm:web:v3",
     "test:wasm:node": "node tests/node_test.cjs && node test-cross-impl.mjs && node test-node.mjs && node test-vectors.mjs",
     "test:wasm:web": "cross-env NO_HEADLESS=true wasm-pack test --chrome",
@@ -56,6 +61,11 @@
       "import": "./pkg/v5/paseto_wasm.js",
       "require": "./pkg/v5/cjs/paseto_wasm.cjs",
       "types": "./pkg/v5/paseto_wasm.d.ts"
+    },
+    "./v6": {
+      "import": "./pkg/v6/paseto_wasm.js",
+      "require": "./pkg/v6/cjs/paseto_wasm.cjs",
+      "types": "./pkg/v6/paseto_wasm.d.ts"
     }
   },
   "license": "MIT",
