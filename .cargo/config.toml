@@ -1,0 +1,22 @@
+# NOTE: an earlier version of this file forced `p384_backend = "fiat"` by
+# default, on the theory that fiat-crypto's specialized field arithmetic
+# would beat the generic Montgomery backend. Benchmarked head-to-head on
+# wasm32 (same process, same run, both backends built — see
+# `build:wasm:node:v3:fiat-backend` below), that didn't hold up: fiat was
+# ~18% SLOWER for sign and statistically tied for verify. Left disabled.
+#
+# Likely reason: crypto-bigint (the generic backend) already uses the same
+# 32-bit limb width as fiat-crypto does on this target (`target_pointer_width
+# = 32`), and is itself a mature, const-generic-unrolled implementation, not
+# a naive one — fiat-crypto's advantage of fully-unrolled, synthesized code
+# doesn't clearly survive being re-compiled by V8's wasm JIT the way it
+# would in a native LLVM build.
+#
+# Open question, NOT tested: on the wasm64/Memory64 build
+# (`target_pointer_width = 64`), both backends would use 64-bit limbs
+# instead (6 limbs instead of 12), which changes the unrolled-code-size
+# tradeoff substantially. Worth re-running this same comparison there
+# before assuming the conclusion transfers.
+#
+# [build]
+# rustflags = ["--cfg", "p384_backend=\"fiat\""]

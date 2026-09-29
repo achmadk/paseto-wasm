@@ -259,7 +259,103 @@ pub fn generate_v3_public_key_pair() -> V3KeyPair {
     }
 }
 
+/// A reusable ECDSA P-384 signer.
+///
+/// `SigningKey` parsing and public-key derivation (`VerifyingKey::from`) each
+/// cost a full elliptic-curve scalar multiplication. The free function
+/// `sign_v3_public` below pays both of those on *every call* because it is
+/// stateless. `V3Signer` pays them once, in the constructor, and reuses the
+/// result for every subsequent `sign`. Prefer this whenever the same secret
+/// key signs more than one message (which is the common case).
+///
+/// @example
+/// ```javascript
+/// const kp = paseto.generate_v3_public_key_pair();
+/// const signer = new paseto.V3Signer(kp.secret);
+/// const token1 = signer.sign({ data: "one" }, null, null);
+/// const token2 = signer.sign({ data: "two" }, null, null);
+/// ```
+#[wasm_bindgen]
+pub struct V3Signer {
+    signing_key: SigningKey,
+    pk_bytes: [u8; 49],
+}
+
+#[wasm_bindgen]
+impl V3Signer {
+    /// Parses the secret key and derives the public key once.
+    ///
+    /// @param {string} secretKeyHex - 48-byte secret key as hex
+    #[wasm_bindgen(constructor)]
+    pub fn new(secret_key_hex: &str) -> Result<V3Signer, JsValue> {
+        let key_vec = crate::common::decode_hex_key(secret_key_hex, 48)?;
+        let signing_key = SigningKey::from_slice(&key_vec)
+            .map_err(|_| JsValue::from_str("Invalid secret key"))?;
+        let verifying_key = VerifyingKey::from(&signing_key);
+        let encoded_point = verifying_key.to_sec1_point(true);
+        let mut pk_bytes = [0u8; 49];
+        pk_bytes.copy_from_slice(encoded_point.as_bytes());
+        Ok(V3Signer {
+            signing_key,
+            pk_bytes,
+        })
+    }
+
+    /// Signs a message, reusing the cached secret key and public key.
+    ///
+    /// @param {string|object} message - Payload to sign
+    /// @param {string|null} footer - Optional footer
+    /// @param {string|null} implicitAssertion - Optional implicit assertion
+    /// @returns {string} Token: `v3.public.<message || signature>`
+    pub fn sign(
+        &self,
+        message: JsValue,
+        footer: Option<String>,
+        implicit_assertion: Option<String>,
+    ) -> Result<String, JsValue> {
+        let message_str = crate::common::serialize_message(message)?;
+
+        let footer_str = footer.clone().unwrap_or_default();
+        let implicit = implicit_assertion.unwrap_or_default();
+
+        let m2 = crate::common::pae_encode(&[
+            &self.pk_bytes,
+            V3_PUBLIC_HEADER.as_bytes(),
+            message_str.as_bytes(),
+            footer_str.as_bytes(),
+            implicit.as_bytes(),
+        ]);
+        let signature: Signature = self.signing_key.sign(&m2);
+        let sig_bytes = signature.to_bytes();
+
+        let mut payload = Vec::with_capacity(message_str.len() + SIG_SIZE);
+        payload.extend_from_slice(message_str.as_bytes());
+        payload.extend_from_slice(&sig_bytes);
+
+        let payload_b64 = URL_SAFE_NO_PAD.encode(&payload);
+        Ok(crate::common::format_token(
+            V3_PUBLIC_HEADER,
+            &payload_b64,
+            &footer,
+        ))
+    }
+
+    /// The signer's 49-byte compressed public key, as hex — avoids a second
+    /// call to `generate_v3_public_key_pair` or a manual re-derivation when
+    /// the caller needs it (e.g. to hand to a `V3Verifier`).
+    #[wasm_bindgen(getter)]
+    pub fn public_key(&self) -> String {
+        hex::encode(self.pk_bytes)
+    }
+}
+
 /// Signs a message using V3 Public (ECDSA P-384).
+///
+/// Convenience wrapper around [`V3Signer`] for one-off signing. It parses the
+/// key and re-derives the public key on *every* call, which costs an extra
+/// elliptic-curve scalar multiplication each time. If you are signing more
+/// than one message with the same key (e.g. in a request-handling loop),
+/// construct a `V3Signer` once instead and call `.sign()` on it repeatedly.
 ///
 /// @example
 /// ```javascript
@@ -280,43 +376,95 @@ pub fn sign_v3_public(
     footer: Option<String>,
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
-    let key_vec = crate::common::decode_hex_key(secret_key_hex, 48)?;
+    V3Signer::new(secret_key_hex)?.sign(message, footer, implicit_assertion)
+}
 
-    let signing_key =
-        SigningKey::from_slice(&key_vec).map_err(|_| JsValue::from_str("Invalid secret key"))?;
-    let verifying_key = VerifyingKey::from(&signing_key);
-    let pk_bytes = verifying_key.to_sec1_point(true);
-    let pk_slice = pk_bytes.as_bytes();
+/// A reusable ECDSA P-384 verifier.
+///
+/// `VerifyingKey::from_sec1_bytes` decompresses the SEC1 point, which
+/// requires a modular square root — not free, and pointless to redo for
+/// every token when the same public key is checked repeatedly (e.g.
+/// verifying many requests against one issuer's key). `V3Verifier` pays
+/// that decompression once, in the constructor.
+///
+/// @example
+/// ```javascript
+/// const verifier = new paseto.V3Verifier(kp.public);
+/// const payload1 = verifier.verify(token1, null, null);
+/// const payload2 = verifier.verify(token2, null, null);
+/// ```
+#[wasm_bindgen]
+pub struct V3Verifier {
+    verifying_key: VerifyingKey,
+    key_bytes: [u8; 49],
+}
 
-    let message_str = crate::common::serialize_message(message)?;
+#[wasm_bindgen]
+impl V3Verifier {
+    /// Parses and decompresses the public key once.
+    ///
+    /// @param {string} publicKeyHex - 49-byte public key as hex
+    #[wasm_bindgen(constructor)]
+    pub fn new(public_key_hex: &str) -> Result<V3Verifier, JsValue> {
+        let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
+        let verifying_key = VerifyingKey::from_sec1_bytes(&key_vec)
+            .map_err(|_| JsValue::from_str("Invalid public key"))?;
+        let mut key_bytes = [0u8; 49];
+        key_bytes.copy_from_slice(&key_vec);
+        Ok(V3Verifier {
+            verifying_key,
+            key_bytes,
+        })
+    }
 
-    let footer_str = footer.clone().unwrap_or_default();
-    let implicit = implicit_assertion.clone().unwrap_or_default();
+    /// Verifies a token, reusing the cached (already-decompressed) public key.
+    ///
+    /// @param {string} token - Signed token
+    /// @param {string|null} footer - Footer used during signing
+    /// @param {string|null} implicitAssertion - Implicit assertion used during signing
+    /// @returns {string} Verified message
+    pub fn verify(
+        &self,
+        token: &str,
+        footer: Option<String>,
+        implicit_assertion: Option<String>,
+    ) -> Result<String, JsValue> {
+        let raw = crate::common::parse_token(token, V3_PUBLIC_HEADER, &footer)?;
+        if raw.len() < SIG_SIZE {
+            return Err(JsValue::from_str("Token too short"));
+        }
+        let message_len = raw.len() - SIG_SIZE;
+        let message_bytes = &raw[..message_len];
+        let sig_bytes = &raw[message_len..];
 
-    let m2 = crate::common::pae_encode(&[
-        pk_slice,
-        V3_PUBLIC_HEADER.as_bytes(),
-        message_str.as_bytes(),
-        footer_str.as_bytes(),
-        implicit.as_bytes(),
-    ]);
-    let signature: Signature = signing_key
-        .sign(&m2);
-    let sig_bytes = signature.to_bytes();
+        let footer_str = footer.unwrap_or_default();
+        let implicit = implicit_assertion.unwrap_or_default();
 
-    let mut payload = Vec::with_capacity(message_str.len() + SIG_SIZE);
-    payload.extend_from_slice(message_str.as_bytes());
-    payload.extend_from_slice(&sig_bytes);
+        let m2 = crate::common::pae_encode(&[
+            &self.key_bytes,
+            V3_PUBLIC_HEADER.as_bytes(),
+            message_bytes,
+            footer_str.as_bytes(),
+            implicit.as_bytes(),
+        ]);
+        let signature = Signature::from_slice(sig_bytes)
+            .map_err(|_| JsValue::from_str("Invalid signature format"))?;
 
-    let payload_b64 = URL_SAFE_NO_PAD.encode(&payload);
-    Ok(crate::common::format_token(
-        V3_PUBLIC_HEADER,
-        &payload_b64,
-        &footer,
-    ))
+        self.verifying_key
+            .verify(&m2, &signature)
+            .map_err(|_| JsValue::from_str("Signature verification failed"))?;
+
+        String::from_utf8(message_bytes.to_vec())
+            .map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
+    }
 }
 
 /// Verifies a V3 Public token (ECDSA P-384).
+///
+/// Convenience wrapper around [`V3Verifier`] for one-off verification. It
+/// re-decompresses the public key on *every* call. If you are verifying more
+/// than one token against the same public key, construct a `V3Verifier` once
+/// instead and call `.verify()` on it repeatedly.
 ///
 /// @example
 /// ```javascript
@@ -336,38 +484,7 @@ pub fn verify_v3_public(
     footer: Option<String>,
     implicit_assertion: Option<String>,
 ) -> Result<String, JsValue> {
-    let key_vec = crate::common::decode_hex_key(public_key_hex, 49)?;
-
-    let verifying_key = VerifyingKey::from_sec1_bytes(&key_vec)
-        .map_err(|_| JsValue::from_str("Invalid public key"))?;
-
-    let raw = crate::common::parse_token(token, V3_PUBLIC_HEADER, &footer)?;
-    if raw.len() < SIG_SIZE {
-        return Err(JsValue::from_str("Token too short"));
-    }
-    let message_len = raw.len() - SIG_SIZE;
-    let message_bytes = &raw[..message_len];
-    let sig_bytes = &raw[message_len..];
-
-    let footer_str = footer.clone().unwrap_or_default();
-    let implicit = implicit_assertion.clone().unwrap_or_default();
-
-    let m2 = crate::common::pae_encode(&[
-        &key_vec,
-        V3_PUBLIC_HEADER.as_bytes(),
-        message_bytes,
-        footer_str.as_bytes(),
-        implicit.as_bytes(),
-    ]);
-    let signature = Signature::from_slice(sig_bytes)
-        .map_err(|_| JsValue::from_str("Invalid signature format"))?;
-
-    verifying_key
-        .verify(&m2, &signature)
-        .map_err(|_| JsValue::from_str("Signature verification failed"))?;
-
-    String::from_utf8(message_bytes.to_vec())
-        .map_err(|_| JsValue::from_str("Message is not valid UTF-8"))
+    V3Verifier::new(public_key_hex)?.verify(token, footer, implicit_assertion)
 }
 
 /// Converts a V3 local key to PASERK format.

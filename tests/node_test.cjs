@@ -26,6 +26,8 @@ const {
     verify_v3_public,
     generate_v3_local_key,
     generate_v3_public_key_pair,
+    V3Signer,
+    V3Verifier,
     // PASERK V3
     key_to_paserk_v3_local,
     paserk_v3_local_to_key,
@@ -59,6 +61,26 @@ try {
     const v3Verified = verify_v3_public(v3KeyPair.public, v3Signed, null, null);
     assert.strictEqual(v3Verified, v3Payload, "V3 Public Verification failed");
     console.log("V3 Public: PASS");
+
+    // --- V3 Public (reusable signer/verifier) ---
+    console.log("Testing V3Signer / V3Verifier (from pkg/v3/cjs)...");
+    const signer = new V3Signer(v3KeyPair.secret);
+    const verifier = new V3Verifier(v3KeyPair.public);
+
+    // Cached public key must match the one the stateless API derives.
+    assert.strictEqual(signer.public_key, v3KeyPair.public, "V3Signer.public_key mismatch");
+
+    // Sign twice with the same signer to prove the cached key is reused correctly.
+    const v3SignedA = signer.sign(v3Payload, null, null);
+    const v3SignedB = signer.sign(v3Payload, "footer", null);
+    assert.strictEqual(verifier.verify(v3SignedA, null, null), v3Payload, "V3Signer/V3Verifier roundtrip (no footer) failed");
+    assert.strictEqual(verifier.verify(v3SignedB, "footer", null), v3Payload, "V3Signer/V3Verifier roundtrip (footer) failed");
+
+    // Cross-check against the stateless functions: a token from one API must
+    // verify under the other, since both derive/parse the same key material.
+    assert.strictEqual(verify_v3_public(v3KeyPair.public, v3SignedA, null, null), v3Payload, "V3Signer token failed stateless verify_v3_public");
+    assert.strictEqual(verifier.verify(v3Signed, null, null), v3Payload, "sign_v3_public token failed V3Verifier.verify");
+    console.log("V3Signer / V3Verifier: PASS");
 
     // --- PASERK V3 ---
     console.log("Testing PASERK V3 (from pkg/v3/cjs)...");
